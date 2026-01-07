@@ -13,9 +13,10 @@ interface Issue {
 interface Props {
     projectId: number;
     onBack: () => void;
+    scopeFileId: number | null;
 }
 
-export default function ValidationResultView({ projectId, onBack }: Props) {
+export default function ValidationResultView({ projectId, onBack, scopeFileId }: Props) {
     const [issues, setIssues] = useState<Issue[]>([]);
     const [loading, setLoading] = useState(false);
     const [ran, setRan] = useState(false);
@@ -24,7 +25,11 @@ export default function ValidationResultView({ projectId, onBack }: Props) {
     const runValidation = async () => {
         setLoading(true);
         try {
-            const res = await fetch(`/api/projects/${projectId}/validate`, { method: 'POST' });
+            const res = await fetch(`/api/projects/${projectId}/validate`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ scopeFileId })
+            });
             const data = await res.json();
             if (data.error) {
                 alert(data.error);

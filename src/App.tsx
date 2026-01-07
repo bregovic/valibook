@@ -18,6 +18,7 @@ function App() {
   // New State for View Mode
   const [viewMode, setViewMode] = useState<'detail' | 'mapping' | 'validation'>('detail');
   const [showCodebooks, setShowCodebooks] = useState(false);
+  const [validationScopeFileId, setValidationScopeFileId] = useState<number | null>(null);
 
   useEffect(() => {
     fetchProjects();
@@ -275,6 +276,8 @@ function App() {
               files={projectFiles}
               onBack={() => setViewMode('detail')}
               onNext={() => setViewMode('validation')}
+              scopeFileId={validationScopeFileId}
+              setScopeFileId={setValidationScopeFileId}
             />
           )}
 
@@ -282,6 +285,7 @@ function App() {
             <ValidationResultView
               projectId={selectedProjectId!}
               onBack={() => setViewMode('mapping')}
+              scopeFileId={validationScopeFileId}
             />
           )}
         </>

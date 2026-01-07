@@ -19,9 +19,11 @@ interface Props {
     files: any[]; // Passed from parent for convenience
     onBack: () => void;
     onNext: () => void;
+    scopeFileId: number | null;
+    setScopeFileId: (id: number | null) => void;
 }
 
-export default function MappingView({ projectId, files, onBack, onNext }: Props) {
+export default function MappingView({ projectId, files, onBack, onNext, scopeFileId, setScopeFileId }: Props) {
     // Files grouped by type
     const sourceFiles = files.filter(f => f.file_type === 'source');
     const targetFiles = files.filter(f => f.file_type === 'target');
@@ -283,6 +285,27 @@ export default function MappingView({ projectId, files, onBack, onNext }: Props)
                     <button onClick={handleAutoMapPair} className="secondary" style={{ fontSize: '0.85em' }}>
                         Scan only this pair
                     </button>
+                </div>
+
+                {/* Validation Scope Configuration */}
+                <div style={{ marginTop: '1rem', padding: '0.8rem', border: '1px solid var(--primary)', borderRadius: '6px', background: 'rgba(99, 102, 241, 0.05)' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+                        <label style={{ fontWeight: 'bold', color: 'var(--primary)' }}>🎯 Validation Scope (Optional):</label>
+                        <select
+                            value={scopeFileId || ''}
+                            onChange={(e) => setScopeFileId(e.target.value ? Number(e.target.value) : null)}
+                            className="input-field"
+                            style={{ flex: 1, minWidth: '200px' }}
+                        >
+                            <option value="">-- Validate ALL Records (Default) --</option>
+                            {targetFiles.map(f => (
+                                <option key={f.id} value={f.id}>Limit validation to IDs found in: {f.original_filename}</option>
+                            ))}
+                        </select>
+                    </div>
+                    <div style={{ fontSize: '0.8em', color: 'var(--text-muted)', marginTop: '4px' }}>
+                        Use this if your Source contains more data than the Export. Validation will skip source rows that define a Key not present in the selected Master Export file.
+                    </div>
                 </div>
             </div>
 

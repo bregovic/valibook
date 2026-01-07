@@ -469,6 +469,7 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
 // 8. Validate Project (Multi-file Support)
 app.post('/api/projects/:id/validate', async (req, res) => {
     const projectId = req.params.id;
+    const { scopeFileId } = req.body;
 
     try {
         // Fetch all project files
@@ -493,43 +494,80 @@ app.post('/api/projects/:id/validate', async (req, res) => {
 
         const getCol = (id: number) => allColumns.find((c: any) => c.id === id);
 
-        // Group mappings by Source File to identify pairs
+        // Helper to get cached sheet data
+        const sheetCache = new Map<string, any[][]>();
+        const readSheet = (path: string) => {
+            if (sheetCache.has(path)) return sheetCache.get(path)!;
+            if (!fs.existsSync(path)) return [];
+            const wb = readFile(path);
+            const data = utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' }) as any[][];
+            sheetCache.set(path, data);
+            return data;
+        };
+
+        // PREPARE SCOPE
+        let allowedScopeKeys: Set<string> | null = null;
+        let scopeKeyColName: string = '';
+
+        if (scopeFileId) {
+            // Find mapping where Target is ScopeFile AND isKey=true
+            // (Standard Key Logic: SourceKey -> TargetKey)
+            let scopeMapping = null;
+
+            // Search all mappings to find which column in ScopeFile is the Key
+            for (const m of mappings) {
+                const tCol = getCol(m.target_column_id);
+                if (tCol && tCol.file_id === scopeFileId) {
+                    try {
+                        if (JSON.parse(m.mapping_note || '{}').isKey) {
+                            scopeMapping = m;
+                            break;
+                        }
+                    } catch (e) { }
+                }
+            }
+
+            if (scopeMapping) {
+                const tCol = getCol(scopeMapping.target_column_id);
+                const sCol = getCol(scopeMapping.source_column_id);
+                scopeKeyColName = sCol ? sCol.column_name : ''; // Use Source Name as the "Global Key Name" (e.g. AccountNum)
+
+                const scopeFile = getFile(scopeFileId);
+                const scopeRows = readSheet(scopeFile.stored_filename);
+                // Assume Header at 0
+                const keyIdx = tCol.column_index;
+                allowedScopeKeys = new Set();
+                for (let i = 1; i < scopeRows.length; i++) {
+                    const val = String(scopeRows[i][keyIdx]).trim();
+                    if (val) allowedScopeKeys.add(val);
+                }
+                console.log(`Validation Scope Enabled: ${scopeKeyColName} (${allowedScopeKeys.size} allowed IDs)`);
+            }
+        }
+
+
+        // Group mappings by Source File
         const filePairs = new Map<number, { targetFileId: number, mappings: any[] }>();
 
         for (const m of mappings) {
             const sCol = getCol(m.source_column_id);
             if (!sCol) continue;
-
             const sourceFileId = sCol.file_id;
-
-            // Identify target file from target column (if mapped)
+            // Identify target file
             let targetFileId = null;
             if (m.target_column_id) {
                 const tCol = getCol(m.target_column_id);
                 if (tCol) targetFileId = tCol.file_id;
             }
-
             if (targetFileId) {
-                if (!filePairs.has(sourceFileId)) {
-                    filePairs.set(sourceFileId, { targetFileId, mappings: [] });
-                }
+                if (!filePairs.has(sourceFileId)) filePairs.set(sourceFileId, { targetFileId, mappings: [] });
                 const group = filePairs.get(sourceFileId);
-                // Ensure consistency (1 Source -> 1 Target assumption per file for simplicity)
-                if (group && group.targetFileId === targetFileId) {
-                    group.mappings.push(m);
-                }
+                if (group && group.targetFileId === targetFileId) group.mappings.push(m);
             }
         }
 
         const results: any[] = [];
-
-        // Helper to get cached codebook values
         const codebookCache = new Map<number, Set<string>>();
-        const readSheet = (path: string) => {
-            if (!fs.existsSync(path)) return [];
-            const wb = readFile(path);
-            return utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' }) as any[][];
-        };
 
         const getCodebookValues = async (cbId: number) => {
             if (!codebookCache.has(cbId)) {
@@ -538,9 +576,7 @@ app.post('/api/projects/:id/validate', async (req, res) => {
                     const rows = readSheet(cbFile.stored_filename) as any[][];
                     const values = new Set(rows.slice(1).map(r => String(r[0])));
                     codebookCache.set(cbId, values);
-                } else {
-                    codebookCache.set(cbId, new Set());
-                }
+                } else { codebookCache.set(cbId, new Set()); }
             }
             return codebookCache.get(cbId)!;
         };
@@ -552,7 +588,7 @@ app.post('/api/projects/:id/validate', async (req, res) => {
 
             if (!sFile || !tFile) continue;
 
-            const fileLabel = `${sFile.original_filename} -> ${tFile.original_filename} `;
+            const fileLabel = `${sFile.original_filename} -> ${tFile.original_filename}`;
 
             // Find Key Mapping
             const keyMapping = group.mappings.find((m: any) => {
@@ -571,96 +607,106 @@ app.post('/api/projects/:id/validate', async (req, res) => {
             const sourceRows = readSheet(sFile.stored_filename);
             const targetRows = readSheet(tFile.stored_filename);
 
-            // Remove headers
-            sourceRows.shift();
-            targetRows.shift();
+            const sourceHeaders = sourceRows[0]; // Needed for finding Scope Column by name
 
-            // Index Maps
+            // DETERMINE SCOPE COLUMN IN SOURCE (FK Check)
+            let sourceScopeColIdx = -1;
+            if (allowedScopeKeys && scopeKeyColName) {
+                const normalize = (s: string) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
+                // Try to find column with same name as Logic Scope Key
+                sourceScopeColIdx = sourceHeaders.findIndex((h: string) => normalize(h) === normalize(scopeKeyColName));
+            }
+
+            // Build Maps
             const sourceMap = new Map<string, any[]>();
-            sourceRows.forEach(r => {
+
+            // Fill Source Map (with Filtering)
+            for (let i = 1; i < sourceRows.length; i++) {
+                const r = sourceRows[i];
+
+                // FILTER: Check if this row belongs to scope
+                if (allowedScopeKeys && sourceScopeColIdx !== -1) {
+                    const fkVal = String(r[sourceScopeColIdx]).trim();
+                    if (!allowedScopeKeys.has(fkVal)) continue; // SKIP row out of scope
+                }
+
                 const k = String(r[sourceKeyIdx]).trim();
                 if (k) sourceMap.set(k, r);
-            });
+            }
 
             const targetMap = new Map<string, any[]>();
-            targetRows.forEach(r => {
+            // Target is just loaded as is
+            for (let i = 1; i < targetRows.length; i++) {
+                const r = targetRows[i];
                 const k = String(r[targetKeyIdx]).trim();
                 if (k) targetMap.set(k, r);
-            });
+            }
 
-            // 1. Check Missing Records
+            // 1. Check Missing Records in Target
             for (const [key, sRow] of sourceMap) {
                 if (!targetMap.has(key)) {
                     results.push({
-                        key,
-                        type: 'missing_row',
-                        message: `Row missing in Target`,
-                        file: fileLabel,
-                        expected: 'Present',
-                        actual: 'Missing'
+                        key, type: 'missing_row', message: `Row missing in Target`, file: fileLabel, expected: 'Present', actual: 'Missing'
                     });
-                } else {
-                    // 2. Check Value Mismatches
-                    const tRow = targetMap.get(key)!;
+                    continue;
+                }
 
-                    for (const m of group.mappings) {
-                        if (m.source_column_id === keyMapping.source_column_id) continue;
-                        if (!m.target_column_id) continue;
+                // Compare Columns
+                const tRow = targetMap.get(key)!;
 
-                        const sColDef = getCol(m.source_column_id);
-                        const tColDef = getCol(m.target_column_id);
+                for (const m of group.mappings) {
+                    if (m === keyMapping) continue; // Skip the key mapping itself
 
-                        if (!sColDef || !tColDef) continue;
+                    const sColDef = getCol(m.source_column_id);
+                    const tColDef = getCol(m.target_column_id);
 
-                        let cbId = null;
-                        try { cbId = JSON.parse(m.mapping_note || '{}').codebookFileId; } catch (e) { }
+                    if (!sColDef || !tColDef) continue;
 
-                        const sIdx = sColDef.column_index;
-                        const tIdx = tColDef.column_index;
+                    const sVal = String(sRow[sColDef.column_index]).trim();
+                    const tVal = String(tRow[tColDef.column_index]).trim();
+                    const sColName = sColDef.column_name;
 
-                        const sVal = String(sRow[sIdx] || '').trim();
-                        const tVal = String(tRow[tIdx] || '').trim();
+                    let cbId = null;
+                    try { cbId = JSON.parse(m.mapping_note || '{}').codebookFileId; } catch (e) { }
 
-                        if (sVal !== tVal) {
-                            results.push({
-                                key,
-                                type: 'value_mismatch',
-                                column: `${sColDef.column_name} `,
-                                expected: sVal,
-                                actual: tVal,
-                                file: fileLabel
-                            });
+                    if (cbId) {
+                        const validValues = await getCodebookValues(cbId);
+                        if (!validValues.has(tVal) && tVal !== '') {
+                            results.push({ key, type: 'codebook_violation', message: `Value '${tVal}' not in codebook`, file: fileLabel, column: sColName, actual: tVal });
                         }
+                    }
 
-                        if (cbId) {
-                            const validValues = await getCodebookValues(cbId);
-                            if (!validValues.has(tVal) && tVal !== '') {
-                                results.push({
-                                    key,
-                                    type: 'codebook_violation',
-                                    column: tColDef.column_name,
-                                    message: `Value not in codebook`,
-                                    expected: 'Valid Code',
-                                    actual: tVal,
-                                    file: fileLabel
-                                });
-                            }
-                        }
+                    if (sVal !== tVal) {
+                        results.push({
+                            key, type: 'value_mismatch', message: 'Value mismatch', file: fileLabel, column: sColName, expected: sVal, actual: tVal
+                        });
                     }
                 }
             }
-        }
+        } // end loop
 
         // Clean & Save Results
         await db.run('DELETE FROM validation_results WHERE project_id = ?', [projectId]);
 
         // Batch insert (simplified loop)
-        const stmt = 'INSERT INTO validation_results (project_id, column_mapping_id, error_message, actual_value, expected_value) VALUES (?, ?, ?, ?, ?)';
+        const stmt = 'INSERT INTO validation_results (project_id, column_mapping_id, error_message, actual_value, expected_value, issue_type, issue_key, issue_file, issue_column) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
+
         for (const r of results) {
-            await db.run(stmt, [projectId, null, `${r.file ? '[' + r.file + '] ' : ''}${r.type}: ${r.message || ''} `, r.actual || '', r.expected || '']);
+            await db.run(stmt, [
+                projectId,
+                null,
+                r.message,
+                r.actual || '',
+                r.expected || '',
+                r.type,
+                r.key,
+                r.file || '',
+                r.column || ''
+            ]);
         }
 
         res.json({ success: true, issuesCount: results.length, limit: 100, issues: results.slice(0, 100) });
+
 
     } catch (error) {
         console.error('Validation Error:', error);
