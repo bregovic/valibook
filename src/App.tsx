@@ -17,7 +17,6 @@ function App() {
 
   // New State for View Mode
   const [viewMode, setViewMode] = useState<'detail' | 'mapping' | 'validation'>('detail');
-  const [showCodebooks, setShowCodebooks] = useState(false);
   const [validationScopeFileId, setValidationScopeFileId] = useState<number | null>(null);
 
   useEffect(() => {
@@ -252,19 +251,6 @@ function App() {
               <div className="upload-grid">
                 {renderFileSection('source', '1. Source File (Source of Truth)')}
                 {renderFileSection('target', '2. Target File (Export to Check)')}
-
-                {(projectFiles.some(f => f.file_type === 'codebook') || showCodebooks) ? (
-                  renderFileSection('codebook', '3. Codebooks (Lookup Tables)')
-                ) : (
-                  <div style={{ textAlign: 'center', marginTop: '0.5rem', gridColumn: '1 / -1' }}>
-                    <span
-                      onClick={() => setShowCodebooks(true)}
-                      style={{ cursor: 'pointer', fontSize: '0.8rem', opacity: 0.5, textDecoration: 'underline' }}
-                    >
-                      + Show Codebook Upload
-                    </span>
-                  </div>
-                )}
               </div>
             </div>
           )}
