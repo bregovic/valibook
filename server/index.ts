@@ -143,7 +143,18 @@ app.delete('/api/files/:id', async (req, res) => {
         const file = await db.get('SELECT * FROM imported_files WHERE id = ?', [fileId]);
 
         if (file) {
-            // Delete from DB (cascade deletes columns)
+            // Manual Cleanup of Dependencies (to avoid FK errors if Cascade not set)
+            // 1. Delete mappings referencing columns of this file
+            await db.run(`
+                DELETE FROM column_mappings 
+                WHERE source_column_id IN (SELECT id FROM file_columns WHERE file_id = ?) 
+                   OR target_column_id IN (SELECT id FROM file_columns WHERE file_id = ?)
+            `, [fileId, fileId]);
+
+            // 2. Delete columns
+            await db.run('DELETE FROM file_columns WHERE file_id = ?', [fileId]);
+
+            // 3. Delete file record
             await db.run('DELETE FROM imported_files WHERE id = ?', [fileId]);
 
             // Try delete physical file
