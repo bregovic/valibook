@@ -58,7 +58,7 @@ class PostgresDB implements IDatabase {
             let parseableUrl = connectionString;
             if (!parseableUrl.includes('://')) {
                 parseableUrl = 'postgresql://' + parseableUrl;
-            } else if (!parseableUrl.startsWith('postgres')) {
+            } else {
                 // Replace schema with postgresql for parsing
                 parseableUrl = parseableUrl.replace(/^[a-z0-9]+:\/\//i, 'postgresql://');
             }
@@ -69,7 +69,12 @@ class PostgresDB implements IDatabase {
             config.port = Number(url.port) || 5432;
             config.user = url.username;
             config.password = url.password;
-            config.database = url.pathname.slice(1); // Remove leading '/'
+
+            // Robustly extract database name: check last segment
+            // Sometimes pathname might be '/railway', sometimes 'stuff/railway'
+            // We split by '/' and take the last non-empty part
+            const pathParts = url.pathname.split('/').filter(p => p.length > 0);
+            config.database = pathParts[pathParts.length - 1];
 
             console.log(`Parsed DB Config: Host=${config.host}, DB=${config.database}, Port=${config.port}`);
 
