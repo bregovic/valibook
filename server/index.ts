@@ -445,6 +445,58 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
                     })
                 })));
             }
+
+            // --- B. FIND REFERENCES (Target -> Other Targets for Consistency Check) ---
+            for (const tCol of targetColsDB) {
+                // Only check ID-like columns
+                if (!/id|code|num|cislo|kod/i.test(tCol.column_name)) continue;
+
+                const tVals = tData.colData.get(tCol.column_index);
+                if (!tVals || tVals.size === 0) continue;
+
+                for (const otherTarget of targets) {
+                    if (otherTarget.id === tFile.id) continue;
+
+                    const otherData = loadFileData(otherTarget);
+                    if (!otherData) continue;
+
+                    const otherCols = await db.query('SELECT * FROM file_columns WHERE file_id = ?', [otherTarget.id]);
+
+                    for (const oCol of otherCols) {
+                        // Strict Name Match for Key columns
+                        if (normalize(tCol.column_name) !== normalize(oCol.column_name)) continue;
+
+                        const oVals = otherData.colData.get(oCol.column_index);
+                        if (!oVals) continue;
+
+                        // Check if oCol is unique enough to be a PK (>90% unique values)
+                        if (oVals.size < (otherData.rowsCount * 0.9)) continue;
+
+                        // Check overlap
+                        let hits = 0, sample = 0;
+                        for (const val of tVals) {
+                            sample++;
+                            if (oVals.has(val)) hits++;
+                        }
+
+                        if (sample > 0 && (hits / sample) > 0.7) {
+                            log(`Found Reference: ${tFile.original_filename}.${tCol.column_name} -> ${otherTarget.original_filename}`);
+                            newMappings.push({
+                                sourceColumnId: null,
+                                targetColumnId: tCol.id,
+                                note: JSON.stringify({
+                                    isKey: false,
+                                    codebookFileId: otherTarget.id,
+                                    refColumnId: oCol.id,
+                                    autoDiscovered: true,
+                                    type: 'reference'
+                                })
+                            });
+                            break;
+                        }
+                    }
+                }
+            }
         }
 
         // SAVE to DB (Magic Apply)
