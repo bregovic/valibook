@@ -673,6 +673,16 @@ app.post('/api/projects/:id/validate', async (req, res) => {
     const projectId = req.params.id;
     const { scopeFileId } = req.body;
 
+    // DUMMY HANDLER - LEVEL 0
+    // No DB, No Logic, Just Response.
+    serverLog(`Auto-Map Request Received for Project ${projectId}`);
+    return res.json({
+        mappings: [],
+        logs: ["Endpoint is reachable. DB check skipped."],
+        status: "alive_level_0"
+    });
+
+    /*
     try {
         const mem = process.memoryUsage();
         serverLog(`Starting Auto-Map Project ${projectId}. Heap: ${Math.round(mem.heapUsed / 1024 / 1024)}MB`);
@@ -693,362 +703,362 @@ app.post('/api/projects/:id/validate', async (req, res) => {
         serverLog(`Found ${allFiles.length} files for project ${projectId}`);
         // ... (rest of logic commented out effectively by the return above)
         */
-        const getFile = (id: number) => allFiles.find((f: any) => f.id === id);
+    const getFile = (id: number) => allFiles.find((f: any) => f.id === id);
 
-        // Fetch all mappings
-        const mappings = await db.query('SELECT * FROM column_mappings WHERE project_id = ?', [projectId]);
+    // Fetch all mappings
+    const mappings = await db.query('SELECT * FROM column_mappings WHERE project_id = ?', [projectId]);
 
-        if (mappings.length === 0) {
-            return res.status(400).json({ error: 'No mappings defined. Please map columns first.' });
-        }
+    if (mappings.length === 0) {
+        return res.status(400).json({ error: 'No mappings defined. Please map columns first.' });
+    }
 
-        // Fetch all column definitions
-        const allColumns = await db.query(
-            `SELECT fc.*, f.file_type 
+    // Fetch all column definitions
+    const allColumns = await db.query(
+        `SELECT fc.*, f.file_type 
              FROM file_columns fc 
              JOIN imported_files f ON fc.file_id = f.id 
              WHERE f.project_id = ? `,
-            [projectId]
-        );
+        [projectId]
+    );
 
-        const getCol = (id: number) => allColumns.find((c: any) => c.id === id);
+    const getCol = (id: number) => allColumns.find((c: any) => c.id === id);
 
-        // Helper to get cached sheet data from DB
-        const sheetCache = new Map<number, any[][]>();
-        const readSheet = async (file: any) => {
-            if (!file) return [];
-            if (sheetCache.has(file.id)) return sheetCache.get(file.id)!;
+    // Helper to get cached sheet data from DB
+    const sheetCache = new Map<number, any[][]>();
+    const readSheet = async (file: any) => {
+        if (!file) return [];
+        if (sheetCache.has(file.id)) return sheetCache.get(file.id)!;
 
-            try {
-                const rowsRes = await db.query('SELECT row_data FROM imported_file_rows WHERE file_id = ? ORDER BY row_index ASC', [file.id]);
-                if (rowsRes && rowsRes.length > 0) {
-                    const data = rowsRes.map(r => JSON.parse(r.row_data));
-                    sheetCache.set(file.id, data);
-                    return data;
-                }
-            } catch (e) { console.error("Error fetching DB rows", e); }
-
-            return [];
-        };
-
-        // PREPARE SCOPE
-        let allowedScopeKeys: Set<string> | null = null;
-        let scopeKeyColName: string = '';
-
-        if (scopeFileId) {
-            // Find mapping where Target is ScopeFile AND isKey=true
-            // (Standard Key Logic: SourceKey -> TargetKey)
-            let scopeMapping = null;
-
-            // Search all mappings to find which column in ScopeFile is the Key
-            for (const m of mappings) {
-                const tCol = getCol(m.target_column_id);
-                if (tCol && tCol.file_id === scopeFileId) {
-                    try {
-                        if (JSON.parse(m.mapping_note || '{}').isKey) {
-                            scopeMapping = m;
-                            break;
-                        }
-                    } catch (e) { }
-                }
+        try {
+            const rowsRes = await db.query('SELECT row_data FROM imported_file_rows WHERE file_id = ? ORDER BY row_index ASC', [file.id]);
+            if (rowsRes && rowsRes.length > 0) {
+                const data = rowsRes.map(r => JSON.parse(r.row_data));
+                sheetCache.set(file.id, data);
+                return data;
             }
+        } catch (e) { console.error("Error fetching DB rows", e); }
 
-            if (scopeMapping) {
-                const tCol = getCol(scopeMapping.target_column_id);
-                const sCol = getCol(scopeMapping.source_column_id);
-                scopeKeyColName = sCol ? sCol.column_name : ''; // Use Source Name as the "Global Key Name" (e.g. AccountNum)
+        return [];
+    };
 
-                const scopeFile = getFile(scopeFileId);
-                const scopeRows = await readSheet(scopeFile); // AWAIT and pass file object
-                // Assume Header at 0
-                const keyIdx = tCol.column_index;
-                allowedScopeKeys = new Set();
-                for (let i = 1; i < scopeRows.length; i++) {
-                    const val = String(scopeRows[i][keyIdx]).trim();
-                    if (val) allowedScopeKeys.add(val);
-                }
-                console.log(`Validation Scope Enabled: ${scopeKeyColName} (${allowedScopeKeys.size} allowed IDs)`);
-            }
-        }
+    // PREPARE SCOPE
+    let allowedScopeKeys: Set<string> | null = null;
+    let scopeKeyColName: string = '';
 
+    if (scopeFileId) {
+        // Find mapping where Target is ScopeFile AND isKey=true
+        // (Standard Key Logic: SourceKey -> TargetKey)
+        let scopeMapping = null;
 
-        // Group mappings by Source File
-        const filePairs = new Map<number, { targetFileId: number, mappings: any[] }>();
-
+        // Search all mappings to find which column in ScopeFile is the Key
         for (const m of mappings) {
-            const sCol = getCol(m.source_column_id);
-            if (!sCol) continue;
-            const sourceFileId = sCol.file_id;
-            // Identify target file
-            let targetFileId = null;
-            if (m.target_column_id) {
-                const tCol = getCol(m.target_column_id);
-                if (tCol) targetFileId = tCol.file_id;
-            }
-            if (targetFileId) {
-                if (!filePairs.has(sourceFileId)) filePairs.set(sourceFileId, { targetFileId, mappings: [] });
-                const group = filePairs.get(sourceFileId);
-                if (group && group.targetFileId === targetFileId) group.mappings.push(m);
+            const tCol = getCol(m.target_column_id);
+            if (tCol && tCol.file_id === scopeFileId) {
+                try {
+                    if (JSON.parse(m.mapping_note || '{}').isKey) {
+                        scopeMapping = m;
+                        break;
+                    }
+                } catch (e) { }
             }
         }
 
-        const results: any[] = [];
-        const codebookCache = new Map<number, Set<string>>();
+        if (scopeMapping) {
+            const tCol = getCol(scopeMapping.target_column_id);
+            const sCol = getCol(scopeMapping.source_column_id);
+            scopeKeyColName = sCol ? sCol.column_name : ''; // Use Source Name as the "Global Key Name" (e.g. AccountNum)
 
-        const getCodebookValues = async (cbId: number) => {
-            if (!codebookCache.has(cbId)) {
-                const cbFile = getFile(cbId);
-                if (cbFile) {
-                    const rows = await readSheet(cbFile) as any[][]; // AWAIT and pass file object
-                    let keyIdx = 0; // Default for Codebooks (Col A)
+            const scopeFile = getFile(scopeFileId);
+            const scopeRows = await readSheet(scopeFile); // AWAIT and pass file object
+            // Assume Header at 0
+            const keyIdx = tCol.column_index;
+            allowedScopeKeys = new Set();
+            for (let i = 1; i < scopeRows.length; i++) {
+                const val = String(scopeRows[i][keyIdx]).trim();
+                if (val) allowedScopeKeys.add(val);
+            }
+            console.log(`Validation Scope Enabled: ${scopeKeyColName} (${allowedScopeKeys.size} allowed IDs)`);
+        }
+    }
 
-                    // If referencing another Export/Source file (Consistency Check), we must use its defined PRIMARY KEY column
-                    if (cbFile.file_type !== 'codebook') {
-                        for (const m of mappings) {
-                            const tCol = getCol(m.target_column_id);
-                            if (tCol && tCol.file_id === cbId) {
-                                try {
-                                    if (JSON.parse(m.mapping_note || '{}').isKey) {
-                                        keyIdx = tCol.column_index;
-                                        break;
-                                    }
-                                } catch (e) { }
-                            }
+
+    // Group mappings by Source File
+    const filePairs = new Map<number, { targetFileId: number, mappings: any[] }>();
+
+    for (const m of mappings) {
+        const sCol = getCol(m.source_column_id);
+        if (!sCol) continue;
+        const sourceFileId = sCol.file_id;
+        // Identify target file
+        let targetFileId = null;
+        if (m.target_column_id) {
+            const tCol = getCol(m.target_column_id);
+            if (tCol) targetFileId = tCol.file_id;
+        }
+        if (targetFileId) {
+            if (!filePairs.has(sourceFileId)) filePairs.set(sourceFileId, { targetFileId, mappings: [] });
+            const group = filePairs.get(sourceFileId);
+            if (group && group.targetFileId === targetFileId) group.mappings.push(m);
+        }
+    }
+
+    const results: any[] = [];
+    const codebookCache = new Map<number, Set<string>>();
+
+    const getCodebookValues = async (cbId: number) => {
+        if (!codebookCache.has(cbId)) {
+            const cbFile = getFile(cbId);
+            if (cbFile) {
+                const rows = await readSheet(cbFile) as any[][]; // AWAIT and pass file object
+                let keyIdx = 0; // Default for Codebooks (Col A)
+
+                // If referencing another Export/Source file (Consistency Check), we must use its defined PRIMARY KEY column
+                if (cbFile.file_type !== 'codebook') {
+                    for (const m of mappings) {
+                        const tCol = getCol(m.target_column_id);
+                        if (tCol && tCol.file_id === cbId) {
+                            try {
+                                if (JSON.parse(m.mapping_note || '{}').isKey) {
+                                    keyIdx = tCol.column_index;
+                                    break;
+                                }
+                            } catch (e) { }
                         }
                     }
+                }
 
-                    const values = new Set<string>();
-                    for (let i = 1; i < rows.length; i++) {
-                        const val = String(rows[i][keyIdx]).trim();
-                        if (val) values.add(val);
-                    }
-                    codebookCache.set(cbId, values);
-                } else { codebookCache.set(cbId, new Set()); }
+                const values = new Set<string>();
+                for (let i = 1; i < rows.length; i++) {
+                    const val = String(rows[i][keyIdx]).trim();
+                    if (val) values.add(val);
+                }
+                codebookCache.set(cbId, values);
+            } else { codebookCache.set(cbId, new Set()); }
+        }
+        return codebookCache.get(cbId)!;
+    };
+
+    // Iterate over each file pair and validate
+    for (const [sFileId, group] of filePairs) {
+        const sFile = getFile(sFileId);
+        const tFile = getFile(group.targetFileId);
+
+        if (!sFile || !tFile) continue;
+
+        const fileLabel = `${sFile.original_filename} -> ${tFile.original_filename}`;
+
+        // Find Key Mapping
+        const keyMapping = group.mappings.find((m: any) => {
+            try { return JSON.parse(m.mapping_note || '{}').isKey; } catch (e) { return false; }
+        });
+
+        if (!keyMapping) {
+            results.push({ key: 'setup', type: 'error', message: `No Primary Key defined for ${fileLabel}`, file: fileLabel });
+            continue;
+        }
+
+        const sourceKeyIdx = getCol(keyMapping.source_column_id)?.column_index;
+        const targetKeyIdx = getCol(keyMapping.target_column_id)?.column_index;
+
+        // Load Data
+        const sourceRows = await readSheet(sFile); // AWAIT and pass file object
+        const targetRows = await readSheet(tFile); // AWAIT and pass file object
+
+        const sourceHeaders = sourceRows[0]; // Needed for finding Scope Column by name
+
+        // DETERMINE SCOPE COLUMN IN SOURCE (FK Check)
+        let sourceScopeColIdx = -1;
+        if (allowedScopeKeys && scopeKeyColName) {
+            // Find the column index in the source file that matches the scopeKeyColName
+            if (sourceHeaders) {
+                sourceScopeColIdx = sourceHeaders.findIndex((header: string) => String(header).trim().toLowerCase() === scopeKeyColName.toLowerCase());
             }
-            return codebookCache.get(cbId)!;
-        };
+        }
 
-        // Iterate over each file pair and validate
-        for (const [sFileId, group] of filePairs) {
-            const sFile = getFile(sFileId);
-            const tFile = getFile(group.targetFileId);
+        // Build Maps & Check Duplicates
+        const sourceMap = new Map<string, any[]>();
+        let duplicatesFound = 0;
+        let exampleDuplicate = '';
 
-            if (!sFile || !tFile) continue;
+        // Fill Source Map (with Filtering)
+        for (let i = 1; i < sourceRows.length; i++) {
+            const r = sourceRows[i];
 
-            const fileLabel = `${sFile.original_filename} -> ${tFile.original_filename}`;
+            // FILTER: Check if this row belongs to scope
+            if (allowedScopeKeys && sourceScopeColIdx !== -1 && sourceScopeColIdx < r.length) {
+                const fkVal = String(r[sourceScopeColIdx]).trim();
+                if (!allowedScopeKeys.has(fkVal)) continue; // SKIP row out of scope
+            }
 
-            // Find Key Mapping
-            const keyMapping = group.mappings.find((m: any) => {
-                try { return JSON.parse(m.mapping_note || '{}').isKey; } catch (e) { return false; }
+            const k = String(r[sourceKeyIdx]).trim();
+            if (!k) continue; // Skip empty keys
+
+            if (sourceMap.has(k)) {
+                duplicatesFound++;
+                if (!exampleDuplicate) exampleDuplicate = k;
+            } else {
+                sourceMap.set(k, r);
+            }
+        }
+
+        if (duplicatesFound > 0) {
+            results.push({
+                key: 'setup',
+                type: 'error',
+                message: `Primary Key '${getCol(keyMapping.source_column_id)?.column_name}' is NOT unique. Found ${duplicatesFound} duplicates (e.g. '${exampleDuplicate}'). Validation aborted for this file.`,
+                file: fileLabel
             });
+            continue; // Skip comparing this file pair
+        }
 
-            if (!keyMapping) {
-                results.push({ key: 'setup', type: 'error', message: `No Primary Key defined for ${fileLabel}`, file: fileLabel });
+        const targetMap = new Map<string, any[]>();
+        // Target is just loaded as is
+        for (let i = 1; i < targetRows.length; i++) {
+            const r = targetRows[i];
+            const k = String(r[targetKeyIdx]).trim();
+            if (k) targetMap.set(k, r);
+        }
+
+        // 1. Check Missing Records in Target
+        for (const [key, sRow] of sourceMap) {
+            if (!targetMap.has(key)) {
+                results.push({
+                    key, type: 'missing_row', message: `Row missing in Target`, file: fileLabel, expected: 'Present', actual: 'Missing'
+                });
                 continue;
             }
 
-            const sourceKeyIdx = getCol(keyMapping.source_column_id)?.column_index;
-            const targetKeyIdx = getCol(keyMapping.target_column_id)?.column_index;
+            // Compare Columns
+            const tRow = targetMap.get(key)!;
 
-            // Load Data
-            const sourceRows = await readSheet(sFile); // AWAIT and pass file object
-            const targetRows = await readSheet(tFile); // AWAIT and pass file object
+            for (const m of group.mappings) {
+                if (m === keyMapping) continue; // Skip the key mapping itself
 
-            const sourceHeaders = sourceRows[0]; // Needed for finding Scope Column by name
+                const sColDef = getCol(m.source_column_id);
+                const tColDef = getCol(m.target_column_id);
 
-            // DETERMINE SCOPE COLUMN IN SOURCE (FK Check)
-            let sourceScopeColIdx = -1;
-            if (allowedScopeKeys && scopeKeyColName) {
-                // Find the column index in the source file that matches the scopeKeyColName
-                if (sourceHeaders) {
-                    sourceScopeColIdx = sourceHeaders.findIndex((header: string) => String(header).trim().toLowerCase() === scopeKeyColName.toLowerCase());
-                }
-            }
+                if (!sColDef || !tColDef) continue;
 
-            // Build Maps & Check Duplicates
-            const sourceMap = new Map<string, any[]>();
-            let duplicatesFound = 0;
-            let exampleDuplicate = '';
+                const sVal = String(sRow[sColDef.column_index]).trim();
+                const tVal = String(tRow[tColDef.column_index]).trim();
+                const sColName = sColDef.column_name;
 
-            // Fill Source Map (with Filtering)
-            for (let i = 1; i < sourceRows.length; i++) {
-                const r = sourceRows[i];
+                let cbId = null;
+                try { cbId = JSON.parse(m.mapping_note || '{}').codebookFileId; } catch (e) { }
 
-                // FILTER: Check if this row belongs to scope
-                if (allowedScopeKeys && sourceScopeColIdx !== -1 && sourceScopeColIdx < r.length) {
-                    const fkVal = String(r[sourceScopeColIdx]).trim();
-                    if (!allowedScopeKeys.has(fkVal)) continue; // SKIP row out of scope
-                }
-
-                const k = String(r[sourceKeyIdx]).trim();
-                if (!k) continue; // Skip empty keys
-
-                if (sourceMap.has(k)) {
-                    duplicatesFound++;
-                    if (!exampleDuplicate) exampleDuplicate = k;
-                } else {
-                    sourceMap.set(k, r);
-                }
-            }
-
-            if (duplicatesFound > 0) {
-                results.push({
-                    key: 'setup',
-                    type: 'error',
-                    message: `Primary Key '${getCol(keyMapping.source_column_id)?.column_name}' is NOT unique. Found ${duplicatesFound} duplicates (e.g. '${exampleDuplicate}'). Validation aborted for this file.`,
-                    file: fileLabel
-                });
-                continue; // Skip comparing this file pair
-            }
-
-            const targetMap = new Map<string, any[]>();
-            // Target is just loaded as is
-            for (let i = 1; i < targetRows.length; i++) {
-                const r = targetRows[i];
-                const k = String(r[targetKeyIdx]).trim();
-                if (k) targetMap.set(k, r);
-            }
-
-            // 1. Check Missing Records in Target
-            for (const [key, sRow] of sourceMap) {
-                if (!targetMap.has(key)) {
-                    results.push({
-                        key, type: 'missing_row', message: `Row missing in Target`, file: fileLabel, expected: 'Present', actual: 'Missing'
-                    });
-                    continue;
-                }
-
-                // Compare Columns
-                const tRow = targetMap.get(key)!;
-
-                for (const m of group.mappings) {
-                    if (m === keyMapping) continue; // Skip the key mapping itself
-
-                    const sColDef = getCol(m.source_column_id);
-                    const tColDef = getCol(m.target_column_id);
-
-                    if (!sColDef || !tColDef) continue;
-
-                    const sVal = String(sRow[sColDef.column_index]).trim();
-                    const tVal = String(tRow[tColDef.column_index]).trim();
-                    const sColName = sColDef.column_name;
-
-                    let cbId = null;
-                    try { cbId = JSON.parse(m.mapping_note || '{}').codebookFileId; } catch (e) { }
-
-                    if (cbId) {
-                        const validValues = await getCodebookValues(cbId);
-                        if (!validValues.has(tVal) && tVal !== '') {
-                            results.push({ key, type: 'codebook_violation', message: `Value '${tVal}' not in codebook`, file: fileLabel, column: sColName, actual: tVal });
-                        }
+                if (cbId) {
+                    const validValues = await getCodebookValues(cbId);
+                    if (!validValues.has(tVal) && tVal !== '') {
+                        results.push({ key, type: 'codebook_violation', message: `Value '${tVal}' not in codebook`, file: fileLabel, column: sColName, actual: tVal });
                     }
+                }
 
-                    if (sVal !== tVal) {
+                if (sVal !== tVal) {
+                    results.push({
+                        key, type: 'value_mismatch', message: 'Value mismatch', file: fileLabel, column: sColName, expected: sVal, actual: tVal
+                    });
+                }
+            }
+        }
+    } // end loop
+
+    // ===========================================
+    // EXCLUSION LIST VALIDATION
+    // Check if export files contain forbidden values from 'exclusion' files
+    // ===========================================
+    const exclusionFiles = allFiles.filter((f: any) => f.file_type === 'exclusion');
+
+    if (exclusionFiles.length > 0) {
+        console.log(`[Validation] Checking ${exclusionFiles.length} exclusion file(s)...`);
+
+        // Build exclusion sets (column name -> forbidden values)
+        const exclusionMap = new Map<string, Set<string>>();
+
+        for (const exFile of exclusionFiles) {
+            const exRows = await readSheet(exFile); // AWAIT and pass file object
+            if (exRows.length < 2) continue;
+
+            const headers = exRows[0] as string[];
+
+            // Each column in exclusion file is a separate exclusion list
+            for (let colIdx = 0; colIdx < headers.length; colIdx++) {
+                const colName = String(headers[colIdx]).trim().toLowerCase();
+                if (!colName) continue;
+
+                if (!exclusionMap.has(colName)) {
+                    exclusionMap.set(colName, new Set());
+                }
+
+                // Add all values from this column
+                for (let r = 1; r < exRows.length; r++) {
+                    const val = String(exRows[r][colIdx]).trim();
+                    if (val) exclusionMap.get(colName)!.add(val);
+                }
+            }
+        }
+
+        console.log(`[Validation] Loaded exclusion lists for columns: ${Array.from(exclusionMap.keys()).join(', ')}`);
+
+        // Check each Target (Export) file against exclusions
+        const targetFiles = allFiles.filter((f: any) => f.file_type === 'target');
+
+        for (const tFile of targetFiles) {
+            const tRows = await readSheet(tFile);
+            if (tRows.length < 2) continue;
+
+            const headers = tRows[0] as string[];
+
+            // Check each column that has an exclusion list
+            for (let colIdx = 0; colIdx < headers.length; colIdx++) {
+                const colName = String(headers[colIdx]).trim().toLowerCase();
+
+                if (!exclusionMap.has(colName)) continue;
+
+                const forbiddenValues = exclusionMap.get(colName)!;
+
+                // Check each row in export
+                for (let r = 1; r < tRows.length; r++) {
+                    const val = String(tRows[r][colIdx]).trim();
+
+                    if (val && forbiddenValues.has(val)) {
                         results.push({
-                            key, type: 'value_mismatch', message: 'Value mismatch', file: fileLabel, column: sColName, expected: sVal, actual: tVal
+                            key: `row_${r}`,
+                            type: 'exclusion_violation',
+                            message: `Forbidden value '${val}' found in column '${headers[colIdx]}'`,
+                            file: tFile.original_filename,
+                            column: headers[colIdx],
+                            actual: val
                         });
                     }
                 }
             }
-        } // end loop
-
-        // ===========================================
-        // EXCLUSION LIST VALIDATION
-        // Check if export files contain forbidden values from 'exclusion' files
-        // ===========================================
-        const exclusionFiles = allFiles.filter((f: any) => f.file_type === 'exclusion');
-
-        if (exclusionFiles.length > 0) {
-            console.log(`[Validation] Checking ${exclusionFiles.length} exclusion file(s)...`);
-
-            // Build exclusion sets (column name -> forbidden values)
-            const exclusionMap = new Map<string, Set<string>>();
-
-            for (const exFile of exclusionFiles) {
-                const exRows = await readSheet(exFile); // AWAIT and pass file object
-                if (exRows.length < 2) continue;
-
-                const headers = exRows[0] as string[];
-
-                // Each column in exclusion file is a separate exclusion list
-                for (let colIdx = 0; colIdx < headers.length; colIdx++) {
-                    const colName = String(headers[colIdx]).trim().toLowerCase();
-                    if (!colName) continue;
-
-                    if (!exclusionMap.has(colName)) {
-                        exclusionMap.set(colName, new Set());
-                    }
-
-                    // Add all values from this column
-                    for (let r = 1; r < exRows.length; r++) {
-                        const val = String(exRows[r][colIdx]).trim();
-                        if (val) exclusionMap.get(colName)!.add(val);
-                    }
-                }
-            }
-
-            console.log(`[Validation] Loaded exclusion lists for columns: ${Array.from(exclusionMap.keys()).join(', ')}`);
-
-            // Check each Target (Export) file against exclusions
-            const targetFiles = allFiles.filter((f: any) => f.file_type === 'target');
-
-            for (const tFile of targetFiles) {
-                const tRows = await readSheet(tFile);
-                if (tRows.length < 2) continue;
-
-                const headers = tRows[0] as string[];
-
-                // Check each column that has an exclusion list
-                for (let colIdx = 0; colIdx < headers.length; colIdx++) {
-                    const colName = String(headers[colIdx]).trim().toLowerCase();
-
-                    if (!exclusionMap.has(colName)) continue;
-
-                    const forbiddenValues = exclusionMap.get(colName)!;
-
-                    // Check each row in export
-                    for (let r = 1; r < tRows.length; r++) {
-                        const val = String(tRows[r][colIdx]).trim();
-
-                        if (val && forbiddenValues.has(val)) {
-                            results.push({
-                                key: `row_${r}`,
-                                type: 'exclusion_violation',
-                                message: `Forbidden value '${val}' found in column '${headers[colIdx]}'`,
-                                file: tFile.original_filename,
-                                column: headers[colIdx],
-                                actual: val
-                            });
-                        }
-                    }
-                }
-            }
         }
-
-        // Clean & Save Results
-        await db.run('DELETE FROM validation_results WHERE project_id = ?', [projectId]);
-
-        // Batch insert (simplified loop)
-        const stmt = 'INSERT INTO validation_results (project_id, column_mapping_id, error_message, actual_value, expected_value) VALUES (?, ?, ?, ?, ?)';
-
-        for (const r of results) {
-            const fullMessage = `[${r.file || 'unknown'}] ${r.type}: ${r.column ? r.column + ' - ' : ''}${r.message} (Key: ${r.key})`;
-            await db.run(stmt, [
-                projectId,
-                null,
-                fullMessage,
-                r.actual || '',
-                r.expected || ''
-            ]);
-        }
-
-        res.json({ success: true, issuesCount: results.length, limit: 100, issues: results.slice(0, 100) });
-
-
-    } catch (error) {
-        console.error('Validation Error:', error);
-        res.status(500).json({ error: (error as Error).message });
     }
+
+    // Clean & Save Results
+    await db.run('DELETE FROM validation_results WHERE project_id = ?', [projectId]);
+
+    // Batch insert (simplified loop)
+    const stmt = 'INSERT INTO validation_results (project_id, column_mapping_id, error_message, actual_value, expected_value) VALUES (?, ?, ?, ?, ?)';
+
+    for (const r of results) {
+        const fullMessage = `[${r.file || 'unknown'}] ${r.type}: ${r.column ? r.column + ' - ' : ''}${r.message} (Key: ${r.key})`;
+        await db.run(stmt, [
+            projectId,
+            null,
+            fullMessage,
+            r.actual || '',
+            r.expected || ''
+        ]);
+    }
+
+    res.json({ success: true, issuesCount: results.length, limit: 100, issues: results.slice(0, 100) });
+
+
+} catch (error) {
+    console.error('Validation Error:', error);
+    res.status(500).json({ error: (error as Error).message });
+}
 });
 
 app.get('/api/debug/rows/:fileId', async (req, res) => {
