@@ -424,9 +424,25 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
                 newMappings.push(...bestSourceMappings.map(m => ({
                     sourceColumnId: m.sourceColumnId,
                     targetColumnId: m.targetColumnId,
-                    note: `Auto-Discovered (Score: ${m.score.toFixed(2)})`,
-                    codebookFileId: m.codebookFileId
+                    // Store metadata in note as JSON for frontend compatibility
+                    note: JSON.stringify({
+                        isKey: false, // Default
+                        codebookFileId: m.codebookFileId,
+                        autoDiscovered: true,
+                        score: m.score.toFixed(2)
+                    })
                 })));
+            }
+        }
+
+        // SAVE to DB (Magic Apply)
+        if (newMappings.length > 0) {
+            // Clear old mappings to avoid conflicts/duplicates
+            await db.run('DELETE FROM column_mappings WHERE project_id = ?', [projectId]);
+
+            for (const m of newMappings) {
+                await db.run('INSERT INTO column_mappings (project_id, source_column_id, target_column_id, mapping_note) VALUES (?, ?, ?, ?)',
+                    [projectId, m.sourceColumnId, m.targetColumnId, m.note]);
             }
         }
 

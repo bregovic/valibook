@@ -164,6 +164,50 @@ export default function MappingView({ projectId, files, onBack, onNext }: Props)
         });
     };
 
+    const handleMappingChange = (targetId: number, newSourceId: number | null) => {
+        setMappings(prev => {
+            // Logic: Target can only have ONE Source. 
+            // 1. Find if this target is already mapped to something.
+            const existingMappingForTarget = prev.find(m => m.targetColumnId === targetId);
+
+            let next = [...prev];
+
+            // If we are unsetting (newSourceId is null), just remove the target from the mapping
+            if (newSourceId === null) {
+                if (existingMappingForTarget) {
+                    // We can't just delete the object if it holds codebook info or isKey for source?
+                    // But mapping is defined by the link. 
+                    // Let's simplify: Remove the whole mapping object for now.
+                    next = next.filter(m => m.targetColumnId !== targetId);
+                }
+                return next;
+            }
+
+            // If we are setting a NEW Source (switching source or creating new)
+            // 1. Remove old mapping for this target
+            if (existingMappingForTarget) {
+                next = next.filter(m => m.targetColumnId !== targetId);
+            }
+
+            // 2. Check if the New Source is already mapped to something else? 
+            // In theory one Source col could map to multiple Target cols (e.g. splitting), but usually 1:1.
+            // Let's assume 1:1 for now to avoid confusion? No, let's allow 1:N but typically 1:1.
+
+            // 3. Create or Update Source Mapping
+            // Actually, we should check if an entry for this Source ID already exists (e.g. holding just metadata)
+            // But with current logic, mappings are links.
+
+            next.push({
+                sourceColumnId: newSourceId,
+                targetColumnId: targetId,
+                isKey: false,
+                codebookFileId: null
+            });
+
+            return next;
+        });
+    };
+
     const saveMappings = async () => {
         const payload = mappings.filter(m => m.targetColumnId !== null || m.isKey || m.codebookFileId).map(m => ({
             sourceColumnId: m.sourceColumnId,
@@ -249,55 +293,79 @@ export default function MappingView({ projectId, files, onBack, onNext }: Props)
                     <thead>
                         <tr>
                             <th style={{ width: '60px', textAlign: 'center' }}>Key</th>
-                            <th>Column in <em>{sourceFiles.find(f => f.id === selectedSourceFileId)?.original_filename}</em></th>
-                            <th>Sample</th>
-                            <th>Maps to <em>{targetFiles.find(f => f.id === selectedTargetFileId)?.original_filename}</em></th>
+                            <th>Column in <em>{targetFiles.find(f => f.id === selectedTargetFileId)?.original_filename || 'Export'}</em></th>
+                            <th>Sample (Export)</th>
+                            <th>Maps to <em>{sourceFiles.find(f => f.id === selectedSourceFileId)?.original_filename || 'Source'}</em></th>
                             {codebookFiles.length > 0 && <th>Validation Rule</th>}
                         </tr>
                     </thead>
                     <tbody>
-                        {sourceCols.length === 0 ? (
+                        {targetCols.length === 0 ? (
                             <tr><td colSpan={5} style={{ textAlign: 'center', padding: '2rem' }}>Select files above to begin mapping.</td></tr>
-                        ) : sourceCols.map(sCol => {
-                            const m = mappings.find(map => map.sourceColumnId === sCol.id);
+                        ) : targetCols.map(tCol => {
+                            // Find mapping where THIS target column is the target
+                            // Logic: The DB stores Source -> Target. We need to find the pair.
+                            const m = mappings.find(map => map.targetColumnId === tCol.id);
+
                             const isKey = m?.isKey || false;
-                            const targetId = m?.targetColumnId ?? '';
+                            const sourceId = m?.sourceColumnId ?? '';
+                            // Note: If multiple sources map to same target (unlikely/invalid), we pick first.
+
                             const codebookId = m?.codebookFileId ?? '';
 
                             return (
-                                <tr key={sCol.id} className={isKey ? 'selected-key-row' : ''} style={isKey ? { background: 'rgba(99, 102, 241, 0.1)' } : {}}>
+                                <tr key={tCol.id} className={isKey ? 'selected-key-row' : ''} style={isKey ? { background: 'rgba(99, 102, 241, 0.1)' } : {}}>
                                     <td style={{ textAlign: 'center' }}>
                                         <input
                                             type="radio"
                                             name="primary_key"
                                             checked={isKey}
-                                            onChange={() => updateMapping(sCol.id, { isKey: true })}
+                                            onChange={() => {
+                                                // To set key, we need an existing mapping record.
+                                                // If no source is selected, we can't really set key on the relationship yet easily in this DB schema
+                                                // unless we allow partial mappings.
+                                                if (sourceId) updateMapping(Number(sourceId), { isKey: true });
+                                                else alert("Please select a Source column first to mark as key.");
+                                            }}
                                             style={{ cursor: 'pointer', width: '1.2em', height: '1.2em' }}
                                         />
                                     </td>
-                                    <td><strong>{sCol.column_name}</strong></td>
-                                    <td style={{ color: 'var(--text-muted)', fontSize: '0.9em' }}>{sCol.sample_value}</td>
+                                    <td><strong>{tCol.column_name}</strong></td>
+                                    <td style={{ color: 'var(--text-muted)', fontSize: '0.9em' }}>{tCol.sample_value}</td>
                                     <td>
                                         <select
                                             className="table-select"
-                                            value={targetId}
-                                            onChange={(e) => updateMapping(sCol.id, { targetColumnId: e.target.value ? parseInt(e.target.value) : null })}
+                                            value={sourceId}
+                                            onChange={(e) => {
+                                                const newSourceId = e.target.value ? parseInt(e.target.value) : null;
+
+                                                // Function to update state needs to be clever now.
+                                                // We are changing the Source ID for a fixed Target ID.
+                                                // But state is indexed/managed by mappings objects.
+
+                                                handleMappingChange(tCol.id, newSourceId);
+                                            }}
                                             style={{ width: '100%' }}
                                         >
                                             <option value="">-- Unmapped --</option>
-                                            {targetCols.map(tCol => (
-                                                <option key={tCol.id} value={tCol.id}>{tCol.column_name}</option>
+                                            {sourceCols.map(sCol => (
+                                                <option key={sCol.id} value={sCol.id}>{sCol.column_name}</option>
                                             ))}
                                         </select>
                                         {/* Sample display below select */}
-                                        {m?.targetColumnId && <div style={{ fontSize: '0.8em', color: 'var(--text-muted)', marginTop: '4px' }}>Sample: {targetCols.find(t => t.id === m.targetColumnId)?.sample_value}</div>}
+                                        {m?.sourceColumnId && <div style={{ fontSize: '0.8em', color: 'var(--text-muted)', marginTop: '4px' }}>Sample: {sourceCols.find(s => s.id === m.sourceColumnId)?.sample_value}</div>}
                                     </td>
                                     {codebookFiles.length > 0 && (
                                         <td>
                                             <select
                                                 className="table-select"
                                                 value={codebookId}
-                                                onChange={(e) => updateMapping(sCol.id, { codebookFileId: e.target.value ? parseInt(e.target.value) : null })}
+                                                onChange={(e) => {
+                                                    const cbId = e.target.value ? parseInt(e.target.value) : null;
+                                                    // We need to update the mapping record that contains this target ID
+                                                    if (sourceId) updateMapping(Number(sourceId), { codebookFileId: cbId });
+                                                    else alert("Map a source column first to add validation.");
+                                                }}
                                                 style={{ width: '100%' }}
                                             >
                                                 <option value="">-- No Validation --</option>
