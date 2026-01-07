@@ -440,15 +440,58 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
             if (bestSourceFile && bestSourceMappings.length > 0) {
                 log(` => WINNER for ${tFile.original_filename} is ${bestSourceFile.original_filename}`);
 
-                // Identify PRIMARY KEY (Heuristic)
-                // Prefer exact matches like "ID", "AccountNum", "Code"
-                // Then try to find anything containing "ID"
-                let keyCandidate = bestSourceMappings.find(m =>
-                    ['id', 'code', 'key', 'accountnum', 'accountnumber', 'cislo'].includes(m.sourceColName.toLowerCase())
-                );
+                // Identify PRIMARY KEY (Improved Heuristic)
+                // 1. Must be a MAPPED column (exists in both files)
+                // 2. Must have HIGH UNIQUENESS in both files (>90%)
+                // 3. Prefer ID-like names
 
-                if (!keyCandidate) {
-                    keyCandidate = bestSourceMappings.find(m => m.sourceColName.toLowerCase().includes('id'));
+                const tData = loadFileData(tFile);
+                const sData = loadFileData(bestSourceFile);
+
+                let keyCandidate: any = null;
+                let bestKeyScore = 0;
+
+                for (const m of bestSourceMappings) {
+                    // Find column data
+                    const tCol = targetColsDB.find((c: any) => c.id === m.targetColumnId);
+                    const sCol = await db.query('SELECT * FROM file_columns WHERE id = ?', [m.sourceColumnId]);
+
+                    if (!tCol || !sCol[0]) continue;
+
+                    const tVals = tData?.colData.get(tCol.column_index);
+                    const sVals = sData?.colData.get(sCol[0].column_index);
+
+                    if (!tVals || !sVals) continue;
+
+                    // Calculate uniqueness (unique values / total values)
+                    const tUniqueness = tData?.rowsCount ? tVals.size / tData.rowsCount : 0;
+                    const sUniqueness = sData?.rowsCount ? sVals.size / sData.rowsCount : 0;
+
+                    // Both must have high uniqueness (>85%)
+                    if (tUniqueness < 0.85 || sUniqueness < 0.85) continue;
+
+                    // Calculate key score
+                    let keyScore = (tUniqueness + sUniqueness) / 2; // Average uniqueness
+
+                    // Bonus for ID-like names
+                    const colName = m.sourceColName.toLowerCase();
+                    if (['id', 'key', 'recid', 'accountnum', 'accountnumber', 'code', 'cislo'].includes(colName)) {
+                        keyScore += 0.3;
+                    } else if (/id$|^id|_id|num$|code$/.test(colName)) {
+                        keyScore += 0.15;
+                    }
+
+                    if (keyScore > bestKeyScore) {
+                        bestKeyScore = keyScore;
+                        keyCandidate = m;
+                        log(`   Key candidate: ${m.sourceColName} (score: ${keyScore.toFixed(2)}, uniqueness: T=${(tUniqueness * 100).toFixed(0)}% S=${(sUniqueness * 100).toFixed(0)}%)`);
+                    }
+                }
+
+                if (keyCandidate) {
+                    log(`   Selected Primary Key: ${keyCandidate.sourceColName}`);
+                } else {
+                    log(`   WARNING: No suitable Primary Key found for this mapping!`);
                 }
 
                 newMappings.push(...bestSourceMappings.map(m => ({
