@@ -108,21 +108,24 @@ function App() {
         {files.length > 0 ? (
           <div className="file-list">
             {files.map(file => (
-              <div key={file.id} className="file-info fade-in" style={{ marginBottom: '0.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ textAlign: 'left', flex: 1, minWidth: 0, paddingRight: '10px' }}>
+              <div key={file.id} className="file-info fade-in" style={{ marginBottom: '0.5rem', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                {/* Left side: Icon + Text (flexible width) */}
+                <div style={{ flex: 1, minWidth: 0, overflow: 'hidden' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
                     <span style={{ flexShrink: 0 }}>✅</span>
                     <strong style={{
                       whiteSpace: 'nowrap',
                       overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      display: 'block'
-                    }} title={file.original_filename}>{file.original_filename}</strong>
+                      textOverflow: 'ellipsis'
+                    }} title={file.original_filename}>
+                      {file.original_filename}
+                    </strong>
                   </div>
                   <div style={{ fontSize: '0.85rem', marginTop: '0.1rem', opacity: 0.7, color: 'var(--text)' }}>
                     {file.columns?.length || 0} columns detected
                   </div>
                 </div>
+                {/* Right side: Delete button (fixed width) */}
                 <button
                   onClick={() => handleDeleteFile(file.id)}
                   style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem' }}
