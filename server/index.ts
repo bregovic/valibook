@@ -574,7 +574,28 @@ app.post('/api/projects/:id/validate', async (req, res) => {
                 const cbFile = getFile(cbId);
                 if (cbFile) {
                     const rows = readSheet(cbFile.stored_filename) as any[][];
-                    const values = new Set(rows.slice(1).map(r => String(r[0])));
+                    let keyIdx = 0; // Default for Codebooks (Col A)
+
+                    // If referencing another Export/Source file (Consistency Check), we must use its defined PRIMARY KEY column
+                    if (cbFile.file_type !== 'codebook') {
+                        for (const m of mappings) {
+                            const tCol = getCol(m.target_column_id);
+                            if (tCol && tCol.file_id === cbId) {
+                                try {
+                                    if (JSON.parse(m.mapping_note || '{}').isKey) {
+                                        keyIdx = tCol.column_index;
+                                        break;
+                                    }
+                                } catch (e) { }
+                            }
+                        }
+                    }
+
+                    const values = new Set<string>();
+                    for (let i = 1; i < rows.length; i++) {
+                        const val = String(rows[i][keyIdx]).trim();
+                        if (val) values.add(val);
+                    }
                     codebookCache.set(cbId, values);
                 } else { codebookCache.set(cbId, new Set()); }
             }

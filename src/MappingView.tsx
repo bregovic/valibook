@@ -319,7 +319,7 @@ export default function MappingView({ projectId, files, onBack, onNext, scopeFil
                             <th>Column in <em>{targetFiles.find(f => f.id === selectedTargetFileId)?.original_filename || 'Export'}</em></th>
                             <th>Sample (Export)</th>
                             <th>Maps to <em>{sourceFiles.find(f => f.id === selectedSourceFileId)?.original_filename || 'Source'}</em></th>
-                            {codebookFiles.length > 0 && <th>Validation Rule</th>}
+                            <th>Validation / Reference</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -378,26 +378,38 @@ export default function MappingView({ projectId, files, onBack, onNext, scopeFil
                                         {/* Sample display below select */}
                                         {m?.sourceColumnId && <div style={{ fontSize: '0.8em', color: 'var(--text-muted)', marginTop: '4px' }}>Sample: {sourceCols.find(s => s.id === m.sourceColumnId)?.sample_value}</div>}
                                     </td>
-                                    {codebookFiles.length > 0 && (
-                                        <td>
-                                            <select
-                                                className="table-select"
-                                                value={codebookId}
-                                                onChange={(e) => {
-                                                    const cbId = e.target.value ? parseInt(e.target.value) : null;
-                                                    // We need to update the mapping record that contains this target ID
-                                                    if (sourceId) updateMapping(Number(sourceId), { codebookFileId: cbId });
-                                                    else alert("Map a source column first to add validation.");
-                                                }}
-                                                style={{ width: '100%' }}
-                                            >
-                                                <option value="">-- No Validation --</option>
+                                    {/* VALIDATION RULE COLUMN */}
+                                    <td>
+                                        <select
+                                            className="table-select"
+                                            value={codebookId}
+                                            onChange={(e) => {
+                                                const cbId = e.target.value ? parseInt(e.target.value) : null;
+                                                // Update mapping
+                                                if (sourceId) updateMapping(Number(sourceId), { codebookFileId: cbId });
+                                                else alert("Map a source column first to add validation.");
+                                            }}
+                                            style={{ width: '100%' }}
+                                        >
+                                            <option value="">-- No Validation --</option>
+
+                                            {/* 1. Standard Codebooks */}
+                                            {codebookFiles.length > 0 && <optgroup label="📘 Lookups (Codebooks)">
                                                 {codebookFiles.map(cb => (
-                                                    <option key={cb.id} value={cb.id}>Check in: {cb.original_filename}</option>
+                                                    <option key={cb.id} value={cb.id}>{cb.original_filename}</option>
                                                 ))}
-                                            </select>
-                                        </td>
-                                    )}
+                                            </optgroup>}
+
+                                            {/* 2. Cross-Reference other Export Files */}
+                                            {targetFiles.filter(f => f.id !== selectedTargetFileId).length > 0 && (
+                                                <optgroup label="🔗 Consistency Check (Ref Integrity)">
+                                                    {targetFiles.filter(f => f.id !== selectedTargetFileId).map(tf => (
+                                                        <option key={tf.id} value={tf.id}>Exits in: {tf.original_filename}</option>
+                                                    ))}
+                                                </optgroup>
+                                            )}
+                                        </select>
+                                    </td>
                                 </tr>
                             );
                         })}
