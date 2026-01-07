@@ -48,10 +48,14 @@ class PostgresDB implements IDatabase {
 
     constructor(connectionString: string) {
         // Fix for non-standard protocols in Railway connection strings
+        // We relentlessly replace the protocol part with 'postgresql://' to ensure compatibility.
         let validConnectionString = connectionString;
-        if (validConnectionString.startsWith('railway')) {
-            validConnectionString = validConnectionString.replace(/^railway/, '');
+
+        if (validConnectionString.includes('://')) {
+            validConnectionString = validConnectionString.replace(/^[a-z0-9]+:\/\//i, 'postgresql://');
         }
+
+        console.log('Original connection string protocol:', connectionString.split('://')[0]);
 
         this.pool = new pg.Pool({
             connectionString: validConnectionString,
