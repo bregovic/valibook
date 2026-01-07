@@ -399,8 +399,9 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
                         fileMappings.push({
                             sourceColumnId: bestColMatch.id,
                             targetColumnId: tCol.id,
+                            sourceColName: bestColMatch.column_name, // Capture name for Key guessing
                             score: bestColScore,
-                            isKey: false, // will determine later
+                            isKey: false,
                             codebookFileId: sFile.file_type === 'codebook' ? sFile.id : null
                         });
                     }
@@ -421,12 +422,23 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
             if (bestSourceFile && bestSourceMappings.length > 0) {
                 log(` => WINNER for ${tFile.original_filename} is ${bestSourceFile.original_filename}`);
 
+                // Identify PRIMARY KEY (Heuristic)
+                // Prefer exact matches like "ID", "AccountNum", "Code"
+                // Then try to find anything containing "ID"
+                let keyCandidate = bestSourceMappings.find(m =>
+                    ['id', 'code', 'key', 'accountnum', 'accountnumber', 'cislo'].includes(m.sourceColName.toLowerCase())
+                );
+
+                if (!keyCandidate) {
+                    keyCandidate = bestSourceMappings.find(m => m.sourceColName.toLowerCase().includes('id'));
+                }
+
                 newMappings.push(...bestSourceMappings.map(m => ({
                     sourceColumnId: m.sourceColumnId,
                     targetColumnId: m.targetColumnId,
                     // Store metadata in note as JSON for frontend compatibility
                     note: JSON.stringify({
-                        isKey: false, // Default
+                        isKey: (keyCandidate && m.sourceColumnId === keyCandidate.sourceColumnId) || false,
                         codebookFileId: m.codebookFileId,
                         autoDiscovered: true,
                         score: m.score.toFixed(2)
