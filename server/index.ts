@@ -102,7 +102,7 @@ app.post('/api/projects/:id/files', upload.single('file'), async (req, res) => {
     const fileType = req.body.fileType; // 'source' | 'target' | 'codebook'
 
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-    if (!['source', 'target', 'codebook'].includes(fileType)) {
+    if (!['source', 'target', 'codebook', 'exclusion'].includes(fileType)) {
         return res.status(400).json({ error: 'Invalid file type' });
     }
 
