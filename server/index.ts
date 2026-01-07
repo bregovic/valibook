@@ -189,41 +189,107 @@ app.post('/api/projects/:id/mappings', async (req, res) => {
     }
 });
 
-// 7. Auto-Map Columns (Helper)
+// 7. Auto-Map Columns (Smart Content-Based)
 app.post('/api/projects/:id/auto-map', async (req, res) => {
     const projectId = req.params.id;
     try {
-        // Get source and target files
-        const sourceFile = await db.get("SELECT id FROM imported_files WHERE project_id = ? AND file_type = 'source' LIMIT 1", [projectId]);
-        const targetFile = await db.get("SELECT id FROM imported_files WHERE project_id = ? AND file_type = 'target' LIMIT 1", [projectId]);
+        // Get source and target files info
+        const sourceFile = await db.get("SELECT * FROM imported_files WHERE project_id = ? AND file_type = 'source' LIMIT 1", [projectId]);
+        const targetFile = await db.get("SELECT * FROM imported_files WHERE project_id = ? AND file_type = 'target' LIMIT 1", [projectId]);
 
         if (!sourceFile || !targetFile) {
             return res.status(400).json({ error: 'Source or Target file missing' });
         }
 
-        const sourceCols = await db.query('SELECT * FROM file_columns WHERE file_id = ?', [sourceFile.id]);
-        const targetCols = await db.query('SELECT * FROM file_columns WHERE file_id = ?', [targetFile.id]);
+        // Helper to read column data
+        const getColumnData = (filePath: string) => {
+            const wb = XLSX.readFile(filePath);
+            const sheet = wb.Sheets[wb.SheetNames[0]];
+            // Get data array of arrays
+            const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }) as any[][];
+            if (rows.length < 2) return { headers: [], dataCols: {} }; // Only header or empty
+
+            // Transpose logic: we need columns
+            const headers = rows[0] as string[];
+            const dataCols: { [key: number]: Set<string> } = {};
+
+            // Initialize sets
+            headers.forEach((_, idx) => dataCols[idx] = new Set());
+
+            // Limit rows scan for performance (e.g. first 1000 rows)
+            const limit = Math.min(rows.length, 1000);
+            for (let r = 1; r < limit; r++) {
+                const row = rows[r];
+                row.forEach((val: any, cIdx: number) => {
+                    const s = String(val).trim();
+                    if (s) dataCols[cIdx].add(s);
+                });
+            }
+            return { headers, dataCols };
+        };
+
+        const sourceData = getColumnData(sourceFile.stored_filename);
+        const targetData = getColumnData(targetFile.stored_filename);
+
+        const sourceColsDB = await db.query('SELECT * FROM file_columns WHERE file_id = ?', [sourceFile.id]);
+        const targetColsDB = await db.query('SELECT * FROM file_columns WHERE file_id = ?', [targetFile.id]);
 
         const newMappings = [];
 
-        // Simple name matching (case-insensitive, ignoring underscores/spaces)
-        const normalize = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+        // Helper to normalize for fuzzy name match
+        const normalizeName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
-        for (const sCol of sourceCols) {
-            const sNameNorm = normalize(sCol.column_name);
-            const match = targetCols.find(tCol => normalize(tCol.column_name) === sNameNorm);
+        // Algo: For each source column, verify samples against target columns
+        for (const sCol of sourceColsDB) {
+            const sIdx = sCol.column_index;
+            const sValues = Array.from(sourceData.dataCols[sIdx] || []);
 
-            if (match) {
+            if (sValues.length === 0) continue; // Skip empty columns
+
+            // 1. Pick random samples (up to 10)
+            const samples = sValues.sort(() => 0.5 - Math.random()).slice(0, 10);
+
+            let bestMatch = null;
+            let bestScore = 0;
+
+            for (const tCol of targetColsDB) {
+                const tIdx = tCol.column_index;
+                const tValuesSet = targetData.dataCols[tIdx];
+
+                if (!tValuesSet || tValuesSet.size === 0) continue;
+
+                // Hit count
+                let hits = 0;
+                for (const sample of samples) {
+                    if (tValuesSet.has(sample)) hits++;
+                }
+
+                let score = hits / samples.length; // 0 to 1
+
+                // Bonus for name similarity
+                if (normalizeName(sCol.column_name) === normalizeName(tCol.column_name)) {
+                    score += 0.2;
+                }
+
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestMatch = tCol;
+                }
+            }
+
+            // Threshold for suggestion (e.g. 60% match)
+            if (bestMatch && bestScore >= 0.6) {
                 newMappings.push({
                     sourceColumnId: sCol.id,
-                    targetColumnId: match.id,
-                    note: 'Auto-mapped by name'
+                    targetColumnId: bestMatch.id,
+                    note: `Auto-mapped (Score: ${Math.round(bestScore * 100)}%)`
                 });
             }
         }
 
         res.json({ mappings: newMappings });
     } catch (error) {
+        console.error('Auto-map error:', error);
         res.status(500).json({ error: (error as Error).message });
     }
 });
