@@ -3,7 +3,8 @@ import cors from 'cors';
 import path from 'path';
 import multer from 'multer';
 import db from './db.js';
-import { readFile, utils } from 'xlsx';
+import * as XLSX_PKG from 'xlsx';
+const { readFile, utils } = (XLSX_PKG as any).default ?? XLSX_PKG;
 import fs from 'fs';
 
 const app = express();
