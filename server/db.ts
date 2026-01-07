@@ -47,23 +47,39 @@ class PostgresDB implements IDatabase {
     private pool: pg.Pool;
 
     constructor(connectionString: string) {
-        // Fix for non-standard protocols in Railway connection strings
-        // We relentlessly replace the protocol part with 'postgresql://' to ensure compatibility.
-        let validConnectionString = connectionString;
+        // Fully manual parsing to avoid 'pg' driver confusion with 'railwaypostgresql://'
+        let config: pg.PoolConfig = {
+            ssl: { rejectUnauthorized: false }
+        };
 
-        if (validConnectionString.includes('://')) {
-            validConnectionString = validConnectionString.replace(/^[a-z0-9]+:\/\//i, 'postgresql://');
+        try {
+            // Re-normalize protocol just in case URL parser is strict
+            // If it starts with a weird protocol, swap it for something standard just for parsing
+            let parseableUrl = connectionString;
+            if (!parseableUrl.includes('://')) {
+                parseableUrl = 'postgresql://' + parseableUrl;
+            } else if (!parseableUrl.startsWith('postgres')) {
+                // Replace schema with postgresql for parsing
+                parseableUrl = parseableUrl.replace(/^[a-z0-9]+:\/\//i, 'postgresql://');
+            }
+
+            const url = new URL(parseableUrl);
+
+            config.host = url.hostname;
+            config.port = Number(url.port) || 5432;
+            config.user = url.username;
+            config.password = url.password;
+            config.database = url.pathname.slice(1); // Remove leading '/'
+
+            console.log(`Parsed DB Config: Host=${config.host}, DB=${config.database}, Port=${config.port}`);
+
+        } catch (err) {
+            console.error('Failed to parse connection string manually, falling back to raw string', err);
+            config.connectionString = connectionString.replace(/^[a-z0-9]+:\/\//i, 'postgresql://');
         }
 
-        console.log('Original connection string protocol:', connectionString.split('://')[0]);
-
-        this.pool = new pg.Pool({
-            connectionString: validConnectionString,
-            ssl: {
-                rejectUnauthorized: false
-            }
-        });
-        console.log('Using PostgreSQL Database');
+        this.pool = new pg.Pool(config);
+        console.log('Using PostgreSQL Database with manual config');
     }
 
     async init() {
