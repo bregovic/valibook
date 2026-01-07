@@ -126,79 +126,82 @@ export default function MappingView({ projectId, files, onBack, onNext }: Props)
     };
 
     return (
-        <div className="mapping-view">
-            <div className="header-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                <button onClick={onBack} style={{ background: '#666' }}> Back </button>
-                <h2>Column Mapping & Validation Rules</h2>
-                <div>
-                    <button onClick={handleAutoMap} style={{ marginRight: '10px', background: '#e0a800' }}>Auto Map</button>
-                    <button onClick={saveMappings} style={{ background: '#28a745' }}>Save & Prepare Validation</button>
+        <div className="mapping-view fade-in">
+            <div className="header-actions">
+                <button onClick={onBack} className="secondary"> &larr; Back </button>
+                <h2 style={{ border: 0, margin: 0, fontSize: '1.2rem' }}>Column Mapping & Rules</h2>
+                <div className="actions" style={{ margin: 0 }}>
+                    <button onClick={handleAutoMap} className="secondary" style={{ color: 'var(--warning)', borderColor: 'var(--warning)' }}>Auto Map</button>
+                    <button onClick={saveMappings} className="primary">Save & Validate &rarr;</button>
                 </div>
             </div>
 
-            {loading && <p>Loading...</p>}
+            {loading && <p style={{ textAlign: 'center', padding: '2rem', fontStyle: 'italic', color: 'var(--text-muted)' }}>Loading mappings...</p>}
 
-            <table className="mapping-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-                <thead>
-                    <tr style={{ background: '#eee', textAlign: 'left' }}>
-                        <th style={{ padding: '10px' }}>Is Key?</th>
-                        <th style={{ padding: '10px' }}>Source Column (Vzor)</th>
-                        <th style={{ padding: '10px' }}>Sample</th>
-                        <th style={{ padding: '10px' }}>Target Column (Export)</th>
-                        <th style={{ padding: '10px' }}>Validation Rule</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {sourceCols.map(sCol => {
-                        const m = mappings.find(map => map.sourceColumnId === sCol.id);
-                        const isKey = m?.isKey || false;
-                        const targetId = m?.targetColumnId ?? '';
-                        const codebookId = m?.codebookFileId ?? '';
+            <div style={{ overflowX: 'auto' }}>
+                <table>
+                    <thead>
+                        <tr>
+                            <th style={{ width: '60px', textAlign: 'center' }}>Key</th>
+                            <th>Source Column (Vzor)</th>
+                            <th>Sample</th>
+                            <th>Target Column (Export)</th>
+                            <th>Validation Rule</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {sourceCols.map(sCol => {
+                            const m = mappings.find(map => map.sourceColumnId === sCol.id);
+                            const isKey = m?.isKey || false;
+                            const targetId = m?.targetColumnId ?? '';
+                            const codebookId = m?.codebookFileId ?? '';
 
-                        return (
-                            <tr key={sCol.id} style={{ borderBottom: '1px solid #ddd', background: isKey ? '#e3f2fd' : 'white' }}>
-                                <td style={{ padding: '10px', textAlign: 'center' }}>
-                                    <input
-                                        type="radio"
-                                        name="primary_key"
-                                        checked={isKey}
-                                        onChange={() => updateMapping(sCol.id, { isKey: true })}
-                                    />
-                                </td>
-                                <td style={{ padding: '10px' }}><strong>{sCol.column_name}</strong></td>
-                                <td style={{ padding: '10px', color: '#666', fontSize: '0.9em' }}>{sCol.sample_value}</td>
-                                <td style={{ padding: '10px' }}>
-                                    <select
-                                        value={targetId}
-                                        onChange={(e) => updateMapping(sCol.id, { targetColumnId: e.target.value ? parseInt(e.target.value) : null })}
-                                        style={{ padding: '5px', width: '100%' }}
-                                    >
-                                        <option value="">-- Unmapped --</option>
-                                        {targetCols.map(tCol => (
-                                            <option key={tCol.id} value={tCol.id}>
-                                                {tCol.column_name}
-                                            </option>
-                                        ))}
-                                    </select>
-                                    {m?.targetColumnId && <div style={{ fontSize: '0.8em', color: '#888', marginTop: '4px' }}>Sample: {targetCols.find(t => t.id === m.targetColumnId)?.sample_value}</div>}
-                                </td>
-                                <td style={{ padding: '10px' }}>
-                                    <select
-                                        value={codebookId}
-                                        onChange={(e) => updateMapping(sCol.id, { codebookFileId: e.target.value ? parseInt(e.target.value) : null })}
-                                        style={{ padding: '5px', width: '100%' }}
-                                    >
-                                        <option value="">-- No Validation --</option>
-                                        {codebookFiles.map(cb => (
-                                            <option key={cb.id} value={cb.id}>Check in: {cb.original_filename}</option>
-                                        ))}
-                                    </select>
-                                </td>
-                            </tr>
-                        );
-                    })}
-                </tbody>
-            </table>
+                            return (
+                                <tr key={sCol.id} className={isKey ? 'selected-key-row' : ''} style={isKey ? { background: 'rgba(99, 102, 241, 0.1)' } : {}}>
+                                    <td style={{ textAlign: 'center' }}>
+                                        <input
+                                            type="radio"
+                                            name="primary_key"
+                                            checked={isKey}
+                                            onChange={() => updateMapping(sCol.id, { isKey: true })}
+                                            style={{ cursor: 'pointer', width: '1.2em', height: '1.2em' }}
+                                        />
+                                    </td>
+                                    <td><strong>{sCol.column_name}</strong></td>
+                                    <td style={{ color: 'var(--text-muted)', fontSize: '0.9em' }}>{sCol.sample_value}</td>
+                                    <td>
+                                        <select
+                                            className="table-select"
+                                            value={targetId}
+                                            onChange={(e) => updateMapping(sCol.id, { targetColumnId: e.target.value ? parseInt(e.target.value) : null })}
+                                            style={{ width: '100%' }}
+                                        >
+                                            <option value="">-- Unmapped --</option>
+                                            {targetCols.map(tCol => (
+                                                <option key={tCol.id} value={tCol.id}>{tCol.column_name}</option>
+                                            ))}
+                                        </select>
+                                        {m?.targetColumnId && <div style={{ fontSize: '0.8em', color: 'var(--text-muted)', marginTop: '4px' }}>Sample: {targetCols.find(t => t.id === m.targetColumnId)?.sample_value}</div>}
+                                    </td>
+                                    <td>
+                                        <select
+                                            className="table-select"
+                                            value={codebookId}
+                                            onChange={(e) => updateMapping(sCol.id, { codebookFileId: e.target.value ? parseInt(e.target.value) : null })}
+                                            style={{ width: '100%' }}
+                                        >
+                                            <option value="">-- No Validation --</option>
+                                            {codebookFiles.map(cb => (
+                                                <option key={cb.id} value={cb.id}>Check in: {cb.original_filename}</option>
+                                            ))}
+                                        </select>
+                                    </td>
+                                </tr>
+                            );
+                        })}
+                    </tbody>
+                </table>
+            </div>
         </div>
     );
 }

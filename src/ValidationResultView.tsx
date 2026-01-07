@@ -39,59 +39,77 @@ export default function ValidationResultView({ projectId, onBack }: Props) {
         setLoading(false);
     };
 
+    const getBadgeClass = (type: string) => {
+        if (type === 'value_mismatch') return 'badge danger';
+        if (type === 'missing_row') return 'badge warning';
+        if (type === 'codebook_violation') return 'badge warning';
+        return 'badge';
+    };
+
     return (
-        <div className="validation-view">
-            <div className="header-actions" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                <button onClick={onBack} style={{ background: '#666' }}> Back </button>
-                <h2>Validation Report</h2>
-                <button onClick={runValidation} style={{ background: '#007bff' }}>Run Validation</button>
+        <div className="validation-view fade-in">
+            <div className="header-actions">
+                <button onClick={onBack} className="secondary"> &larr; Back </button>
+                <h2 style={{ border: 0, margin: 0, fontSize: '1.2rem' }}>Validation Report</h2>
+                <button onClick={runValidation} className="primary" disabled={loading}>
+                    {loading ? 'Running...' : 'Run Validation'}
+                </button>
             </div>
 
-            {loading && <p>Running validation... (This might take a moment)</p>}
+            {loading && (
+                <div style={{ textAlign: 'center', padding: '4rem', color: 'var(--text-muted)' }}>
+                    <div className="spinner"></div>
+                    <p>Processing files... This might take a moment.</p>
+                </div>
+            )}
 
             {!loading && ran && (
-                <div>
-                    <div className="summary" style={{ marginBottom: '1rem', padding: '1rem', background: stats.count > 0 ? '#fff3cd' : '#d4edda', border: '1px solid #ccc' }}>
+                <div className="fade-in">
+                    <div className="summary" style={{ marginBottom: '2rem', padding: '1.5rem', borderRadius: 'var(--radius)', background: stats.count > 0 ? 'rgba(239, 68, 68, 0.1)' : 'rgba(16, 185, 129, 0.1)', border: '1px solid transparent', borderColor: stats.count > 0 ? 'var(--danger)' : 'var(--success)' }}>
                         {stats.count === 0 ? (
-                            <strong style={{ color: 'green' }}>Success! No issues found.</strong>
+                            <div style={{ textAlign: 'center' }}>
+                                <h3 style={{ color: 'var(--success)', margin: 0 }}>✅ Success!</h3>
+                                <p>No data discrepancies found.</p>
+                            </div>
                         ) : (
-                            <strong style={{ color: '#856404' }}>Found {stats.count} issues. (Showing first {issues.length})</strong>
+                            <div style={{ textAlign: 'center' }}>
+                                <h3 style={{ color: 'var(--danger)', margin: 0 }}>Found {stats.count} issues</h3>
+                                <p style={{ opacity: 0.8 }}>(Showing first {issues.length})</p>
+                            </div>
                         )}
                     </div>
 
                     {issues.length > 0 && (
-                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9em' }}>
-                            <thead>
-                                <tr style={{ background: '#eee', textAlign: 'left' }}>
-                                    <th style={{ padding: '8px' }}>Type</th>
-                                    <th style={{ padding: '8px' }}>Key</th>
-                                    <th style={{ padding: '8px' }}>Column</th>
-                                    <th style={{ padding: '8px' }}>Expected</th>
-                                    <th style={{ padding: '8px' }}>Actual</th>
-                                    <th style={{ padding: '8px' }}>Message</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {issues.map((issue, idx) => (
-                                    <tr key={idx} style={{ borderBottom: '1px solid #ddd' }}>
-                                        <td style={{ padding: '8px' }}>
-                                            <span style={{
-                                                padding: '2px 6px', borderRadius: '4px', fontSize: '0.8em',
-                                                background: issue.type === 'value_mismatch' ? '#f8d7da' : '#e2e3e5',
-                                                color: issue.type === 'value_mismatch' ? '#721c24' : '#383d41'
-                                            }}>
-                                                {issue.type}
-                                            </span>
-                                        </td>
-                                        <td style={{ padding: '8px' }}><strong>{issue.key}</strong></td>
-                                        <td style={{ padding: '8px' }}>{issue.column || '-'}</td>
-                                        <td style={{ padding: '8px', color: 'green' }}>{issue.expected}</td>
-                                        <td style={{ padding: '8px', color: 'red' }}>{issue.actual}</td>
-                                        <td style={{ padding: '8px' }}>{issue.message}</td>
+                        <div style={{ overflowX: 'auto' }}>
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Type</th>
+                                        <th>Key</th>
+                                        <th>Column</th>
+                                        <th>Expected (Vzor)</th>
+                                        <th>Actual (Export)</th>
+                                        <th>Message</th>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody>
+                                    {issues.map((issue, idx) => (
+                                        <tr key={idx}>
+                                            <td>
+                                                <span className={getBadgeClass(issue.type)}>
+                                                    {issue.type.replace('_', ' ')}
+                                                </span>
+                                            </td>
+                                            <td><strong>{issue.key}</strong></td>
+                                            <td>{issue.column || '-'}</td>
+                                            <td style={{ color: 'var(--success)' }}>{issue.expected}</td>
+                                            <td style={{ color: 'var(--danger)', fontWeight: 500 }}>{issue.actual}</td>
+                                            <td style={{ color: 'var(--text-muted)' }}>{issue.message}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
                     )}
                 </div>
             )}
