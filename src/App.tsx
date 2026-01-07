@@ -224,7 +224,7 @@ function App() {
               <div className="upload-grid">
                 {renderFileSection('source', '1. Source File (Source of Truth)')}
                 {renderFileSection('target', '2. Target File (Export to Check)')}
-                {/* {renderFileSection('codebook', '3. Codebooks (Optional)')} */}
+                {renderFileSection('codebook', '3. Codebooks (Lookup Tables)')}
               </div>
             </div>
           )}

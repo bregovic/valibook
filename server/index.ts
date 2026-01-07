@@ -220,13 +220,25 @@ app.post('/api/projects/:id/mappings', async (req, res) => {
 // 7. Auto-Map Columns (Smart Content-Based)
 app.post('/api/projects/:id/auto-map', async (req, res) => {
     const projectId = req.params.id;
+    const { sourceFileId, targetFileId } = req.body; // New optional params
+
     try {
-        // Get source and target files info
-        const sourceFile = await db.get("SELECT * FROM imported_files WHERE project_id = ? AND file_type = 'source' LIMIT 1", [projectId]);
-        const targetFile = await db.get("SELECT * FROM imported_files WHERE project_id = ? AND file_type = 'target' LIMIT 1", [projectId]);
+        let sourceFile, targetFile;
+
+        if (sourceFileId) {
+            sourceFile = await db.get("SELECT * FROM imported_files WHERE id = ? AND project_id = ?", [sourceFileId, projectId]);
+        } else {
+            sourceFile = await db.get("SELECT * FROM imported_files WHERE project_id = ? AND file_type = 'source' LIMIT 1", [projectId]);
+        }
+
+        if (targetFileId) {
+            targetFile = await db.get("SELECT * FROM imported_files WHERE id = ? AND project_id = ?", [targetFileId, projectId]);
+        } else {
+            targetFile = await db.get("SELECT * FROM imported_files WHERE project_id = ? AND file_type = 'target' LIMIT 1", [projectId]);
+        }
 
         if (!sourceFile || !targetFile) {
-            return res.status(400).json({ error: 'Source or Target file missing' });
+            return res.status(400).json({ error: 'Source or Target file missing or invalid selection' });
         }
 
         // Helper to read column data

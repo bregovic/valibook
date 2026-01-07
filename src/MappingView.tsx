@@ -22,35 +22,59 @@ interface Props {
 }
 
 export default function MappingView({ projectId, files, onBack, onNext }: Props) {
+    // Files grouped by type
+    const sourceFiles = files.filter(f => f.file_type === 'source');
+    const targetFiles = files.filter(f => f.file_type === 'target');
+    const codebookFiles = files.filter(f => f.file_type === 'codebook');
+
+    // Selection State
+    const [selectedSourceFileId, setSelectedSourceFileId] = useState<number | null>(null);
+    const [selectedTargetFileId, setSelectedTargetFileId] = useState<number | null>(null);
+
+    // Columns for selected files
     const [sourceCols, setSourceCols] = useState<Column[]>([]);
     const [targetCols, setTargetCols] = useState<Column[]>([]);
+
     const [mappings, setMappings] = useState<Mapping[]>([]);
     const [loading, setLoading] = useState(false);
-    const [codebookFiles, setCodebookFiles] = useState<any[]>([]);
 
+    // Initialize selection with first available files
     useEffect(() => {
-        const sFile = files.find(f => f.file_type === 'source');
-        const tFile = files.find(f => f.file_type === 'target');
-        const cFiles = files.filter(f => f.file_type === 'codebook');
+        if (sourceFiles.length > 0 && !selectedSourceFileId) setSelectedSourceFileId(sourceFiles[0].id);
+        if (targetFiles.length > 0 && !selectedTargetFileId) setSelectedTargetFileId(targetFiles[0].id);
+    }, [files]);
 
-        if (sFile) setSourceCols(sFile.columns);
-        if (tFile) setTargetCols(tFile.columns);
-        setCodebookFiles(cFiles);
+    // Update columns when selection changes
+    useEffect(() => {
+        if (selectedSourceFileId) {
+            const f = sourceFiles.find(f => f.id === selectedSourceFileId);
+            if (f) setSourceCols(f.columns);
+        } else {
+            setSourceCols([]);
+        }
 
-        if (sFile && tFile) {
+        if (selectedTargetFileId) {
+            const f = targetFiles.find(f => f.id === selectedTargetFileId);
+            if (f) setTargetCols(f.columns);
+        } else {
+            setTargetCols([]);
+        }
+    }, [selectedSourceFileId, selectedTargetFileId, files]);
+
+    // Fetch mappings whenever selection changes (or initial load)
+    useEffect(() => {
+        if (selectedSourceFileId && selectedTargetFileId) {
             fetchMappings();
         }
-    }, [files]);
+    }, [selectedSourceFileId, selectedTargetFileId]); // Re-fetch if pair changes
 
     const fetchMappings = async () => {
         setLoading(true);
         try {
-            // 1. Try to fetch existing mappings
             const res = await fetch(`/api/projects/${projectId}/mappings`);
             const existing = await res.json();
 
             if (existing.length > 0) {
-                // Convert DB format to local state format
                 const mappingState = existing.map((m: any) => {
                     let extra = {};
                     try { extra = JSON.parse(m.mapping_note || '{}'); } catch (e) { }
@@ -63,9 +87,6 @@ export default function MappingView({ projectId, files, onBack, onNext }: Props)
                     };
                 });
                 setMappings(mappingState);
-            } else {
-                // Initialize empty mappings based on source columns
-                // We wait for user action or Auto-Map
             }
         } catch (e) {
             console.error(e);
@@ -74,8 +95,18 @@ export default function MappingView({ projectId, files, onBack, onNext }: Props)
     };
 
     const handleAutoMap = async () => {
+        if (!selectedSourceFileId || !selectedTargetFileId) return;
+
         try {
-            const res = await fetch(`/api/projects/${projectId}/auto-map`, { method: 'POST' });
+            // New: Send explicit context for auto-mapping
+            const res = await fetch(`/api/projects/${projectId}/auto-map`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    sourceFileId: selectedSourceFileId,
+                    targetFileId: selectedTargetFileId
+                })
+            });
             const data = await res.json();
 
             if (data.logs) {
@@ -85,10 +116,22 @@ export default function MappingView({ projectId, files, onBack, onNext }: Props)
             }
 
             if (data.mappings && data.mappings.length > 0) {
-                setMappings(data.mappings);
-                alert(`Auto-mapped ${data.mappings.length} columns.`);
+                // Merge new mappings with existing ones (don't lose mappings from other files)
+                setMappings(prev => {
+                    const next = [...prev];
+                    data.mappings.forEach((newMap: Mapping) => {
+                        const idx = next.findIndex(m => m.sourceColumnId === newMap.sourceColumnId);
+                        if (idx >= 0) {
+                            next[idx] = newMap; // Overwrite
+                        } else {
+                            next.push(newMap);
+                        }
+                    });
+                    return next;
+                });
+                alert(`Auto-mapped ${data.mappings.length} columns for this file pair.`);
             } else {
-                alert('Auto-map finished but found 0 matches.\n\nCheck browser console (F12) for detailed matching logs to see why.');
+                alert('Auto-map finished but found 0 matches for this pair.\nCheck console for details.');
             }
         } catch (e) {
             console.error('Auto-map error:', e);
@@ -100,23 +143,14 @@ export default function MappingView({ projectId, files, onBack, onNext }: Props)
         setMappings(prev => {
             const existing = prev.find(m => m.sourceColumnId === sourceId);
             if (existing) {
-                // Update
                 return prev.map(m => m.sourceColumnId === sourceId ? { ...m, ...updates } : m);
             } else {
-                // Create new
                 return [...prev, { sourceColumnId: sourceId, targetColumnId: null, isKey: false, codebookFileId: null, ...updates }];
             }
         });
     };
 
     const saveMappings = async () => {
-        // Filter out empty mappings if necessary, or send as is (if null implies unmapped)
-        // We send all relevant mappings.
-
-        // Ensure we have an entry for everything we want to save. 
-        // Actually, we store what is in state.
-
-        // Serialize extra fields into 'note'
         const payload = mappings.filter(m => m.targetColumnId !== null || m.isKey || m.codebookFileId).map(m => ({
             sourceColumnId: m.sourceColumnId,
             targetColumnId: m.targetColumnId,
@@ -130,7 +164,6 @@ export default function MappingView({ projectId, files, onBack, onNext }: Props)
         });
 
         if (res.ok) {
-            // alert('Mappings saved!');
             onNext();
         } else {
             alert('Error saving mappings');
@@ -139,30 +172,74 @@ export default function MappingView({ projectId, files, onBack, onNext }: Props)
 
     return (
         <div className="mapping-view fade-in">
-            <div className="header-actions">
-                <button onClick={onBack} className="secondary"> &larr; Back </button>
-                <h2 style={{ border: 0, margin: 0, fontSize: '1.2rem' }}>Column Mapping & Rules</h2>
-                <div className="actions" style={{ margin: 0 }}>
-                    <button onClick={handleAutoMap} className="secondary" style={{ color: 'var(--warning)', borderColor: 'var(--warning)' }}>Auto Map</button>
+            <div className="header-actions" style={{ flexDirection: 'column', gap: '1rem', alignItems: 'stretch' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <button onClick={onBack} className="secondary"> &larr; Back </button>
+                    <h2 style={{ border: 0, margin: 0, fontSize: '1.2rem' }}>Relation & Column Mapping</h2>
                     <button onClick={saveMappings} className="primary">Save & Validate &rarr;</button>
+                </div>
+
+                {/* File Pair Selector */}
+                <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr auto 1fr',
+                    gap: '1rem',
+                    background: 'var(--surface-sunken)',
+                    padding: '1rem',
+                    borderRadius: '8px',
+                    alignItems: 'center'
+                }}>
+                    <div>
+                        <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>Source File (Vzor)</label>
+                        <select
+                            className="input-field"
+                            style={{ width: '100%' }}
+                            value={selectedSourceFileId || ''}
+                            onChange={(e) => setSelectedSourceFileId(Number(e.target.value))}
+                        >
+                            {sourceFiles.map(f => <option key={f.id} value={f.id}>{f.original_filename}</option>)}
+                        </select>
+                    </div>
+
+                    <div style={{ fontSize: '1.5rem', color: 'var(--text-muted)' }}>&rarr;</div>
+
+                    <div>
+                        <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 600 }}>Target File (Export)</label>
+                        <select
+                            className="input-field"
+                            style={{ width: '100%' }}
+                            value={selectedTargetFileId || ''}
+                            onChange={(e) => setSelectedTargetFileId(Number(e.target.value))}
+                        >
+                            {targetFiles.map(f => <option key={f.id} value={f.id}>{f.original_filename}</option>)}
+                        </select>
+                    </div>
+                </div>
+
+                <div style={{ textAlign: 'right' }}>
+                    <button onClick={handleAutoMap} className="secondary" style={{ color: 'var(--warning)', borderColor: 'var(--warning)' }}>
+                        Auto Map this Pair
+                    </button>
                 </div>
             </div>
 
             {loading && <p style={{ textAlign: 'center', padding: '2rem', fontStyle: 'italic', color: 'var(--text-muted)' }}>Loading mappings...</p>}
 
-            <div style={{ overflowX: 'auto' }}>
+            <div style={{ overflowX: 'auto', marginTop: '1rem' }}>
                 <table>
                     <thead>
                         <tr>
                             <th style={{ width: '60px', textAlign: 'center' }}>Key</th>
-                            <th>Source Column (Vzor)</th>
+                            <th>Column in <em>{sourceFiles.find(f => f.id === selectedSourceFileId)?.original_filename}</em></th>
                             <th>Sample</th>
-                            <th>Target Column (Export)</th>
-                            <th>Validation Rule</th>
+                            <th>Maps to <em>{targetFiles.find(f => f.id === selectedTargetFileId)?.original_filename}</em></th>
+                            {codebookFiles.length > 0 && <th>Validation Rule</th>}
                         </tr>
                     </thead>
                     <tbody>
-                        {sourceCols.map(sCol => {
+                        {sourceCols.length === 0 ? (
+                            <tr><td colSpan={5} style={{ textAlign: 'center', padding: '2rem' }}>Select files above to begin mapping.</td></tr>
+                        ) : sourceCols.map(sCol => {
                             const m = mappings.find(map => map.sourceColumnId === sCol.id);
                             const isKey = m?.isKey || false;
                             const targetId = m?.targetColumnId ?? '';
@@ -193,21 +270,24 @@ export default function MappingView({ projectId, files, onBack, onNext }: Props)
                                                 <option key={tCol.id} value={tCol.id}>{tCol.column_name}</option>
                                             ))}
                                         </select>
+                                        {/* Sample display below select */}
                                         {m?.targetColumnId && <div style={{ fontSize: '0.8em', color: 'var(--text-muted)', marginTop: '4px' }}>Sample: {targetCols.find(t => t.id === m.targetColumnId)?.sample_value}</div>}
                                     </td>
-                                    <td>
-                                        <select
-                                            className="table-select"
-                                            value={codebookId}
-                                            onChange={(e) => updateMapping(sCol.id, { codebookFileId: e.target.value ? parseInt(e.target.value) : null })}
-                                            style={{ width: '100%' }}
-                                        >
-                                            <option value="">-- No Validation --</option>
-                                            {codebookFiles.map(cb => (
-                                                <option key={cb.id} value={cb.id}>Check in: {cb.original_filename}</option>
-                                            ))}
-                                        </select>
-                                    </td>
+                                    {codebookFiles.length > 0 && (
+                                        <td>
+                                            <select
+                                                className="table-select"
+                                                value={codebookId}
+                                                onChange={(e) => updateMapping(sCol.id, { codebookFileId: e.target.value ? parseInt(e.target.value) : null })}
+                                                style={{ width: '100%' }}
+                                            >
+                                                <option value="">-- No Validation --</option>
+                                                {codebookFiles.map(cb => (
+                                                    <option key={cb.id} value={cb.id}>Check in: {cb.original_filename}</option>
+                                                ))}
+                                            </select>
+                                        </td>
+                                    )}
                                 </tr>
                             );
                         })}
