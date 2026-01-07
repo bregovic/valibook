@@ -111,41 +111,48 @@ app.post('/api/projects/:id/files', upload.single('file'), async (req, res) => {
     try {
         const filePath = req.file.path;
 
-        // 2. Parse Excel file first to get data
+        // 1. Insert into DB (Metadata only)
+        const fileInfo = await db.run(
+            'INSERT INTO imported_files (project_id, original_filename, file_type, stored_filename) VALUES (?, ?, ?, ?)',
+            [projectId, req.file.originalname, fileType, filePath]
+        );
+        const fileId = fileInfo.id;
+
+        // 2. Parse Excel & Batch Insert Rows
         let jsonData: any[][] = [];
         let parseWarning = null;
         try {
-            if (!fs.existsSync(filePath)) {
-                throw new Error(`File not found at path: ${filePath}`);
-            }
+            if (!fs.existsSync(filePath)) throw new Error(`File not found: ${filePath}`);
 
+            // Basic size check logic removed (we handle via batch)
             const stats = fs.statSync(filePath);
-            if (stats.size === 0) {
-                throw new Error('File is empty (0 bytes)');
-            }
+            if (stats.size === 0) throw new Error('File is empty');
 
-            const workbook = readFile(filePath);
-            if (!workbook.SheetNames.length) {
-                throw new Error('Excel file has no sheets');
-            }
-
-            const sheetName = workbook.SheetNames[0];
-            const sheet = workbook.Sheets[sheetName];
-
-            // Convert to JSON (header: 1 means array of arrays)
+            const wb = readFile(filePath);
+            const sheet = wb.Sheets[wb.SheetNames[0]];
             jsonData = utils.sheet_to_json(sheet, { header: 1, defval: '' });
+
+            // BATCH INSERT ROWS
+            const BATCH_SIZE = 500;
+            for (let i = 0; i < jsonData.length; i += BATCH_SIZE) {
+                const chunk = jsonData.slice(i, i + BATCH_SIZE);
+                if (chunk.length === 0) break;
+
+                const placeholders = chunk.map(() => '(?, ?, ?)').join(',');
+                const values = [];
+                for (let c = 0; c < chunk.length; c++) {
+                    values.push(fileId, i + c, JSON.stringify(chunk[c]));
+                }
+
+                // Use query for batch insert (db.run expects RETURNING id for single row usually)
+                await db.query(`INSERT INTO imported_file_rows (file_id, row_index, row_data) VALUES ${placeholders}`, values);
+            }
+
         } catch (parseErr) {
-            console.error('Error parsing Excel file:', parseErr);
-            parseWarning = `Failed to parse file: ${(parseErr as Error).message}`;
+            console.error('Error parsing/saving Excel:', parseErr);
+            parseWarning = `Failed: ${(parseErr as Error).message}`;
         }
 
-        // 1. Insert into DB with file_data (JSON stringified)
-        const fileDataJson = JSON.stringify(jsonData);
-        const fileInfo = await db.run(
-            'INSERT INTO imported_files (project_id, original_filename, file_type, stored_filename, file_data) VALUES (?, ?, ?, ?, ?)',
-            [projectId, req.file.originalname, fileType, filePath, fileDataJson]
-        );
-        const fileId = fileInfo.id;
 
         // 3. Insert column definitions
         if (jsonData && jsonData.length > 0) {
@@ -343,29 +350,31 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
             return res.json({ mappings: [], logs: ["Not enough files to perform discovery."] });
         }
 
-        // Helper: Load Column Data for a file
+        // Helper: Load Column Data for a file (ASYNC now, but we need to fetch inside)
+        // Since loadFileData was synchronous-ish in loop, we need to adapt.
+        // Actually the loop awaits db calls, so we can make loadFileData async.
         const fileDataCache = new Map<number, { headers: any[], colData: Map<number, Set<string>>, rowsCount: number }>();
 
-        const loadFileData = (file: any) => {
+        const loadFileData = async (file: any) => {
             if (fileDataCache.has(file.id)) return fileDataCache.get(file.id)!;
 
             let rows: any[][] = [];
             try {
-                if (file.file_data) {
-                    rows = JSON.parse(file.file_data);
+                // Fetch rows from DB
+                const rowsRes = await db.query('SELECT row_data FROM imported_file_rows WHERE file_id = ? ORDER BY row_index ASC', [file.id]);
+                if (rowsRes && rowsRes.length > 0) {
+                    rows = rowsRes.map(r => JSON.parse(r.row_data));
                 } else {
-                    // Fallback for old files (should not happen with new upload)
-                    log(`Warning: No DB data for file ${file.original_filename}.`);
+                    // Fallback or empty
+                    log(`Warning: No DB rows for file ${file.original_filename}.`);
                     return null;
                 }
             } catch (e) {
-                log(`Error parsing DB data for ${file.original_filename}: ${(e as Error).message}`);
+                log(`Error fetching DB rows for ${file.original_filename}: ${(e as Error).message}`);
                 return null;
             }
 
-            if (!rows || rows.length === 0) return null;
-
-            if (rows.length < 2) return null;
+            if (!rows || rows.length < 2) return null;
 
             const headers = rows[0];
             const colData = new Map<number, Set<string>>();
@@ -393,7 +402,7 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
         // DISCOVERY LOOP
         for (const tFile of targets) {
             log(`Analyzing Target File: ${tFile.original_filename}`);
-            const tData = loadFileData(tFile);
+            const tData = await loadFileData(tFile);
             if (!tData) continue;
 
             const targetColsDB = await db.query('SELECT * FROM file_columns WHERE file_id = ?', [tFile.id]);
@@ -405,7 +414,7 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
             let bestSourceMappings: any[] = [];
 
             for (const sFile of potentialSources) {
-                const sData = loadFileData(sFile);
+                const sData = await loadFileData(sFile);
                 if (!sData) continue;
 
                 const sourceColsDB = await db.query('SELECT * FROM file_columns WHERE file_id = ?', [sFile.id]);
@@ -483,8 +492,8 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
                 // 2. Must have HIGH UNIQUENESS in both files (>90%)
                 // 3. Prefer ID-like names
 
-                const tData = loadFileData(tFile);
-                const sData = loadFileData(bestSourceFile);
+                const tData = await loadFileData(tFile);
+                const sData = await loadFileData(bestSourceFile);
 
                 let keyCandidate: any = null;
                 let bestKeyScore = 0;
@@ -556,7 +565,7 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
                 for (const otherTarget of targets) {
                     if (otherTarget.id === tFile.id) continue;
 
-                    const otherData = loadFileData(otherTarget);
+                    const otherData = await loadFileData(otherTarget);
                     if (!otherData) continue;
 
                     const otherCols = await db.query('SELECT * FROM file_columns WHERE file_id = ?', [otherTarget.id]);
@@ -652,17 +661,18 @@ app.post('/api/projects/:id/validate', async (req, res) => {
 
         // Helper to get cached sheet data from DB
         const sheetCache = new Map<number, any[][]>();
-        const readSheet = (file: any) => {
+        const readSheet = async (file: any) => {
             if (!file) return [];
             if (sheetCache.has(file.id)) return sheetCache.get(file.id)!;
 
             try {
-                if (file.file_data) {
-                    const data = JSON.parse(file.file_data);
+                const rowsRes = await db.query('SELECT row_data FROM imported_file_rows WHERE file_id = ? ORDER BY row_index ASC', [file.id]);
+                if (rowsRes && rowsRes.length > 0) {
+                    const data = rowsRes.map(r => JSON.parse(r.row_data));
                     sheetCache.set(file.id, data);
                     return data;
                 }
-            } catch (e) { console.error("Error parsing file_data", e); }
+            } catch (e) { console.error("Error fetching DB rows", e); }
 
             return [];
         };
@@ -695,7 +705,7 @@ app.post('/api/projects/:id/validate', async (req, res) => {
                 scopeKeyColName = sCol ? sCol.column_name : ''; // Use Source Name as the "Global Key Name" (e.g. AccountNum)
 
                 const scopeFile = getFile(scopeFileId);
-                const scopeRows = readSheet(scopeFile.stored_filename);
+                const scopeRows = await readSheet(scopeFile); // AWAIT and pass file object
                 // Assume Header at 0
                 const keyIdx = tCol.column_index;
                 allowedScopeKeys = new Set();
@@ -735,7 +745,7 @@ app.post('/api/projects/:id/validate', async (req, res) => {
             if (!codebookCache.has(cbId)) {
                 const cbFile = getFile(cbId);
                 if (cbFile) {
-                    const rows = readSheet(cbFile.stored_filename) as any[][];
+                    const rows = await readSheet(cbFile) as any[][]; // AWAIT and pass file object
                     let keyIdx = 0; // Default for Codebooks (Col A)
 
                     // If referencing another Export/Source file (Consistency Check), we must use its defined PRIMARY KEY column
@@ -787,14 +797,18 @@ app.post('/api/projects/:id/validate', async (req, res) => {
             const targetKeyIdx = getCol(keyMapping.target_column_id)?.column_index;
 
             // Load Data
-            const sourceRows = readSheet(sFile.stored_filename);
-            const targetRows = readSheet(tFile.stored_filename);
+            const sourceRows = await readSheet(sFile); // AWAIT and pass file object
+            const targetRows = await readSheet(tFile); // AWAIT and pass file object
 
             const sourceHeaders = sourceRows[0]; // Needed for finding Scope Column by name
 
             // DETERMINE SCOPE COLUMN IN SOURCE (FK Check)
             let sourceScopeColIdx = -1;
             if (allowedScopeKeys && scopeKeyColName) {
+                // Find the column index in the source file that matches the scopeKeyColName
+                if (sourceHeaders) {
+                    sourceScopeColIdx = sourceHeaders.findIndex((header: string) => String(header).trim().toLowerCase() === scopeKeyColName.toLowerCase());
+                }
             }
 
             // Build Maps & Check Duplicates
@@ -807,7 +821,7 @@ app.post('/api/projects/:id/validate', async (req, res) => {
                 const r = sourceRows[i];
 
                 // FILTER: Check if this row belongs to scope
-                if (allowedScopeKeys && sourceScopeColIdx !== -1) {
+                if (allowedScopeKeys && sourceScopeColIdx !== -1 && sourceScopeColIdx < r.length) {
                     const fkVal = String(r[sourceScopeColIdx]).trim();
                     if (!allowedScopeKeys.has(fkVal)) continue; // SKIP row out of scope
                 }
@@ -897,7 +911,7 @@ app.post('/api/projects/:id/validate', async (req, res) => {
             const exclusionMap = new Map<string, Set<string>>();
 
             for (const exFile of exclusionFiles) {
-                const exRows = readSheet(exFile);
+                const exRows = await readSheet(exFile); // AWAIT and pass file object
                 if (exRows.length < 2) continue;
 
                 const headers = exRows[0] as string[];
@@ -925,7 +939,7 @@ app.post('/api/projects/:id/validate', async (req, res) => {
             const targetFiles = allFiles.filter((f: any) => f.file_type === 'target');
 
             for (const tFile of targetFiles) {
-                const tRows = JSON.parse(tFile.file_data);
+                const tRows = await readSheet(tFile);
                 if (tRows.length < 2) continue;
 
                 const headers = tRows[0] as string[];

@@ -129,6 +129,19 @@ class PostgresDB implements IDatabase {
                 `);
 
                 await client.query(`
+                    CREATE TABLE IF NOT EXISTS imported_file_rows (
+                        id SERIAL PRIMARY KEY,
+                        file_id INTEGER REFERENCES imported_files(id) ON DELETE CASCADE,
+                        row_index INTEGER NOT NULL,
+                        row_data TEXT NOT NULL
+                    )
+                `);
+
+                await client.query(`
+                    CREATE INDEX IF NOT EXISTS idx_file_rows_file_id ON imported_file_rows(file_id)
+                `);
+
+                await client.query(`
                     CREATE TABLE IF NOT EXISTS column_mappings (
                         id SERIAL PRIMARY KEY,
                         project_id INTEGER REFERENCES validation_projects(id) ON DELETE CASCADE,
