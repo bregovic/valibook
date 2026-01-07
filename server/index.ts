@@ -109,12 +109,8 @@ app.post('/api/projects/:id/files', upload.single('file'), async (req, res) => {
     try {
         const filePath = req.file.path;
 
-        // 1. Insert into DB
-        const fileInfo = await db.run('INSERT INTO imported_files (project_id, original_filename, file_type, stored_filename) VALUES (?, ?, ?, ?)',
-            [projectId, req.file.originalname, fileType, filePath]);
-        const fileId = fileInfo.id;
-
-        // 2. Parse Columns (Robust)
+        // 2. Parse Excel file first to get data
+        let jsonData: any[][] = [];
         let parseWarning = null;
         try {
             if (!fs.existsSync(filePath)) {
@@ -135,26 +131,41 @@ app.post('/api/projects/:id/files', upload.single('file'), async (req, res) => {
             const sheet = workbook.Sheets[sheetName];
 
             // Convert to JSON (header: 1 means array of arrays)
-            const jsonData: any[][] = utils.sheet_to_json(sheet, { header: 1, defval: '' });
-
-            if (jsonData && jsonData.length > 0) {
-                const headers = jsonData[0];
-                // If only 1 row, samples will be empty but headers are valid
-                const firstRow = jsonData.length > 1 ? jsonData[1] : [];
-
-                for (let idx = 0; idx < headers.length; idx++) {
-                    const name = String(headers[idx] || `Column ${idx + 1}`).trim();
-                    const sample = String(firstRow[idx] || '').substring(0, 100);
-
-                    await db.run('INSERT INTO file_columns (file_id, column_name, column_index, sample_value) VALUES (?, ?, ?, ?)',
-                        [fileId, name, idx, sample]);
-                }
-            } else {
-                parseWarning = 'Excel sheet appears to be empty or could not be parsed as array.';
-            }
+            jsonData = utils.sheet_to_json(sheet, { header: 1, defval: '' });
         } catch (parseErr) {
-            console.error('Error parsing Excel columns:', parseErr);
-            parseWarning = `Failed to parse columns: ${(parseErr as Error).message}`;
+            console.error('Error parsing Excel file:', parseErr);
+            parseWarning = `Failed to parse file: ${(parseErr as Error).message}`;
+        }
+
+        // 1. Insert into DB with file_data (JSON stringified)
+        const fileDataJson = JSON.stringify(jsonData);
+        const fileInfo = await db.run(
+            'INSERT INTO imported_files (project_id, original_filename, file_type, stored_filename, file_data) VALUES (?, ?, ?, ?, ?)',
+            [projectId, req.file.originalname, fileType, filePath, fileDataJson]
+        );
+        const fileId = fileInfo.id;
+
+        // 3. Insert column definitions
+        if (jsonData && jsonData.length > 0) {
+            const headers = jsonData[0];
+            const firstRow = jsonData.length > 1 ? jsonData[1] : [];
+
+            for (let idx = 0; idx < headers.length; idx++) {
+                const name = String(headers[idx] || `Column ${idx + 1}`).trim();
+                const sample = String(firstRow[idx] || '').substring(0, 100);
+
+                await db.run('INSERT INTO file_columns (file_id, column_name, column_index, sample_value) VALUES (?, ?, ?, ?)',
+                    [fileId, name, idx, sample]);
+            }
+        } else if (!parseWarning) {
+            parseWarning = 'Excel sheet appears to be empty or could not be parsed.';
+        }
+
+        // Clean up temp file (optional - data is now in DB)
+        try {
+            fs.unlinkSync(filePath);
+        } catch (e) {
+            console.log('Could not delete temp file:', filePath);
         }
 
         res.json({ success: true, fileId, warning: parseWarning });
@@ -336,39 +347,40 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
         const loadFileData = (file: any) => {
             if (fileDataCache.has(file.id)) return fileDataCache.get(file.id)!;
 
-            const filePath = file.stored_filename;
-            if (!fs.existsSync(filePath)) {
-                log(`Skipping missing file: ${file.original_filename}`);
-                return null;
-            }
-
+            let rows: any[][] = [];
             try {
-                const wb = readFile(filePath);
-                const sheet = wb.Sheets[wb.SheetNames[0]];
-                const rows = utils.sheet_to_json(sheet, { header: 1, defval: '' }) as any[][];
-
-                if (rows.length < 2) return null;
-
-                const headers = rows[0];
-                const colData = new Map<number, Set<string>>();
-
-                // Sample data (optimize: taking max 200 rows for signature analysis)
-                const limit = Math.min(rows.length, 200);
-                for (let r = 1; r < limit; r++) {
-                    rows[r].forEach((val: any, idx: number) => {
-                        if (!colData.has(idx)) colData.set(idx, new Set());
-                        const s = String(val).trim();
-                        if (s) colData.get(idx)!.add(s);
-                    });
+                if (file.file_data) {
+                    rows = JSON.parse(file.file_data);
+                } else {
+                    // Fallback for old files (should not happen with new upload)
+                    log(`Warning: No DB data for file ${file.original_filename}.`);
+                    return null;
                 }
-
-                const result = { headers, colData, rowsCount: rows.length };
-                fileDataCache.set(file.id, result);
-                return result;
             } catch (e) {
-                log(`Error reading ${file.original_filename}: ${e}`);
+                log(`Error parsing DB data for ${file.original_filename}: ${(e as Error).message}`);
                 return null;
             }
+
+            if (!rows || rows.length === 0) return null;
+
+            if (rows.length < 2) return null;
+
+            const headers = rows[0];
+            const colData = new Map<number, Set<string>>();
+
+            // Sample data (optimize: taking max 200 rows for signature analysis)
+            const limit = Math.min(rows.length, 200);
+            for (let r = 1; r < limit; r++) {
+                rows[r].forEach((val: any, idx: number) => {
+                    if (!colData.has(idx)) colData.set(idx, new Set());
+                    const s = String(val).trim();
+                    if (s) colData.get(idx)!.add(s);
+                });
+            }
+
+            const result = { headers, colData, rowsCount: rows.length };
+            fileDataCache.set(file.id, result);
+            return result;
         };
 
         const newMappings = [];
@@ -636,15 +648,21 @@ app.post('/api/projects/:id/validate', async (req, res) => {
 
         const getCol = (id: number) => allColumns.find((c: any) => c.id === id);
 
-        // Helper to get cached sheet data
-        const sheetCache = new Map<string, any[][]>();
-        const readSheet = (path: string) => {
-            if (sheetCache.has(path)) return sheetCache.get(path)!;
-            if (!fs.existsSync(path)) return [];
-            const wb = readFile(path);
-            const data = utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' }) as any[][];
-            sheetCache.set(path, data);
-            return data;
+        // Helper to get cached sheet data from DB
+        const sheetCache = new Map<number, any[][]>();
+        const readSheet = (file: any) => {
+            if (!file) return [];
+            if (sheetCache.has(file.id)) return sheetCache.get(file.id)!;
+
+            try {
+                if (file.file_data) {
+                    const data = JSON.parse(file.file_data);
+                    sheetCache.set(file.id, data);
+                    return data;
+                }
+            } catch (e) { console.error("Error parsing file_data", e); }
+
+            return [];
         };
 
         // PREPARE SCOPE
@@ -877,7 +895,7 @@ app.post('/api/projects/:id/validate', async (req, res) => {
             const exclusionMap = new Map<string, Set<string>>();
 
             for (const exFile of exclusionFiles) {
-                const exRows = readSheet(exFile.stored_filename);
+                const exRows = readSheet(exFile);
                 if (exRows.length < 2) continue;
 
                 const headers = exRows[0] as string[];
@@ -905,7 +923,7 @@ app.post('/api/projects/:id/validate', async (req, res) => {
             const targetFiles = allFiles.filter((f: any) => f.file_type === 'target');
 
             for (const tFile of targetFiles) {
-                const tRows = readSheet(tFile.stored_filename);
+                const tRows = JSON.parse(tFile.file_data);
                 if (tRows.length < 2) continue;
 
                 const headers = tRows[0] as string[];

@@ -108,8 +108,14 @@ class PostgresDB implements IDatabase {
                         original_filename TEXT NOT NULL,
                         stored_filename TEXT NOT NULL,
                         file_type TEXT NOT NULL,
+                        file_data TEXT,
                         uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
                     )
+                `);
+
+                // Migration: Add file_data column if it doesn't exist
+                await client.query(`
+                    ALTER TABLE imported_files ADD COLUMN IF NOT EXISTS file_data TEXT
                 `);
 
                 await client.query(`
