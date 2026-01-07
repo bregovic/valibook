@@ -70,6 +70,14 @@ function App() {
     // Iterate over all selected files
     for (let i = 0; i < e.target.files.length; i++) {
       const file = e.target.files[i];
+
+      // Check for duplicates
+      const isDuplicate = projectFiles.some(pf => pf.original_filename === file.name);
+      if (isDuplicate) {
+        alert(`File '${file.name}' is already uploaded in this project.\nSkipping upload.`);
+        continue;
+      }
+
       const formData = new FormData();
       formData.append('file', file);
       formData.append('fileType', type);
@@ -216,7 +224,7 @@ function App() {
               <div className="upload-grid">
                 {renderFileSection('source', '1. Source File (Source of Truth)')}
                 {renderFileSection('target', '2. Target File (Export to Check)')}
-                {renderFileSection('codebook', '3. Codebooks (Optional)')}
+                {/* {renderFileSection('codebook', '3. Codebooks (Optional)')} */}
               </div>
             </div>
           )}
