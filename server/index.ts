@@ -667,7 +667,8 @@ app.post('/api/projects/:id/validate', async (req, res) => {
     const { scopeFileId } = req.body;
 
     try {
-        serverLog(`Starting Auto-Map for Project ${projectId}`);
+        const mem = process.memoryUsage();
+        serverLog(`Starting Auto-Map Project ${projectId}. Heap: ${Math.round(mem.heapUsed / 1024 / 1024)}MB`);
         // Fetch all project files
         const allFiles = await db.query("SELECT * FROM imported_files WHERE project_id = ?", [projectId]);
         serverLog(`Found ${allFiles.length} files for project ${projectId}`);
@@ -1055,5 +1056,6 @@ if (process.env.NODE_ENV === 'production') {
 
 app.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
+    serverLog(`SERVER RESTART detected. Time: ${new Date().toISOString()}`);
 });
 
