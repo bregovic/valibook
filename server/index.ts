@@ -3,7 +3,7 @@ import cors from 'cors';
 import path from 'path';
 import multer from 'multer';
 import db from './db.js';
-import * as XLSX from 'xlsx';
+import { readFile, utils } from 'xlsx';
 import fs from 'fs';
 
 const app = express();
@@ -96,7 +96,7 @@ app.post('/api/projects/:id/files', upload.single('file'), async (req, res) => {
                 throw new Error('File is empty (0 bytes)');
             }
 
-            const workbook = XLSX.readFile(filePath);
+            const workbook = readFile(filePath);
             if (!workbook.SheetNames.length) {
                 throw new Error('Excel file has no sheets');
             }
@@ -105,7 +105,7 @@ app.post('/api/projects/:id/files', upload.single('file'), async (req, res) => {
             const sheet = workbook.Sheets[sheetName];
 
             // Convert to JSON (header: 1 means array of arrays)
-            const jsonData: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+            const jsonData: any[][] = utils.sheet_to_json(sheet, { header: 1, defval: '' });
 
             if (jsonData && jsonData.length > 0) {
                 const headers = jsonData[0];
@@ -236,10 +236,10 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
             }
 
             try {
-                const wb = XLSX.readFile(filePath);
+                const wb = readFile(filePath);
                 const sheet = wb.Sheets[wb.SheetNames[0]];
                 // Get data array of arrays
-                const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }) as any[][];
+                const rows = utils.sheet_to_json(sheet, { header: 1, defval: '' }) as any[][];
                 if (rows.length < 2) return { headers: [], dataCols: {} }; // Only header or empty
 
                 // Transpose logic: we need columns
@@ -391,8 +391,8 @@ app.post('/api/projects/:id/validate', async (req, res) => {
 
         // Load Data
         const readSheet = (path: string) => {
-            const wb = XLSX.readFile(path);
-            return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' }) as any[][];
+            const wb = readFile(path);
+            return utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' }) as any[][];
         };
 
         const sourceRows = readSheet(sourceFile.stored_filename);
