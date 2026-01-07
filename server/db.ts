@@ -47,67 +47,85 @@ class PostgresDB implements IDatabase {
     private pool: pg.Pool;
 
     constructor(connectionString: string) {
+        // Fix for non-standard protocols in Railway connection strings
+        let validConnectionString = connectionString;
+        if (validConnectionString.startsWith('railway')) {
+            validConnectionString = validConnectionString.replace(/^railway/, '');
+        }
+
         this.pool = new pg.Pool({
-            connectionString,
+            connectionString: validConnectionString,
             ssl: {
-                rejectUnauthorized: false // Required for many cloud Postgres providers (Railway, Heroku, etc.)
+                rejectUnauthorized: false
             }
         });
         console.log('Using PostgreSQL Database');
     }
 
     async init() {
-        // Simple schema migration for PG
-        // Warning: schema.sql syntax must be compatible!
-        // We might need to adjust schema.sql for types (INTEGER PRIMARY KEY AUTOINCREMENT vs SERIAL)
-
-        const client = await this.pool.connect();
+        console.log('Initializing PostgreSQL tables...');
         try {
-            await client.query(`
-                CREATE TABLE IF NOT EXISTS validation_projects (
-                    id SERIAL PRIMARY KEY,
-                    name TEXT NOT NULL,
-                    description TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
+            const client = await this.pool.connect();
+            try {
+                await client.query(`
+                    CREATE TABLE IF NOT EXISTS validation_projects (
+                        id SERIAL PRIMARY KEY,
+                        name TEXT NOT NULL,
+                        description TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                `);
 
-                CREATE TABLE IF NOT EXISTS imported_files (
-                    id SERIAL PRIMARY KEY,
-                    project_id INTEGER REFERENCES validation_projects(id) ON DELETE CASCADE,
-                    original_filename TEXT NOT NULL,
-                    stored_filename TEXT NOT NULL,
-                    file_type TEXT NOT NULL,
-                    uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
+                await client.query(`
+                    CREATE TABLE IF NOT EXISTS imported_files (
+                        id SERIAL PRIMARY KEY,
+                        project_id INTEGER REFERENCES validation_projects(id) ON DELETE CASCADE,
+                        original_filename TEXT NOT NULL,
+                        stored_filename TEXT NOT NULL,
+                        file_type TEXT NOT NULL,
+                        uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                `);
 
-                CREATE TABLE IF NOT EXISTS file_columns (
-                    id SERIAL PRIMARY KEY,
-                    file_id INTEGER REFERENCES imported_files(id) ON DELETE CASCADE,
-                    column_name TEXT NOT NULL,
-                    column_index INTEGER NOT NULL,
-                    sample_value TEXT
-                );
-                
-                CREATE TABLE IF NOT EXISTS column_mappings (
-                    id SERIAL PRIMARY KEY,
-                    project_id INTEGER REFERENCES validation_projects(id) ON DELETE CASCADE,
-                    source_column_id INTEGER REFERENCES file_columns(id),
-                    target_column_id INTEGER REFERENCES file_columns(id),
-                    mapping_note TEXT
-                );
+                await client.query(`
+                    CREATE TABLE IF NOT EXISTS file_columns (
+                        id SERIAL PRIMARY KEY,
+                        file_id INTEGER REFERENCES imported_files(id) ON DELETE CASCADE,
+                        column_name TEXT NOT NULL,
+                        column_index INTEGER NOT NULL,
+                        sample_value TEXT
+                    )
+                `);
 
-                CREATE TABLE IF NOT EXISTS validation_results (
-                    id SERIAL PRIMARY KEY,
-                    project_id INTEGER REFERENCES validation_projects(id) ON DELETE CASCADE,
-                    column_mapping_id INTEGER REFERENCES column_mappings(id),
-                    error_message TEXT,
-                    actual_value TEXT,
-                    expected_value TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                );
-            `);
-        } finally {
-            client.release();
+                await client.query(`
+                    CREATE TABLE IF NOT EXISTS column_mappings (
+                        id SERIAL PRIMARY KEY,
+                        project_id INTEGER REFERENCES validation_projects(id) ON DELETE CASCADE,
+                        source_column_id INTEGER REFERENCES file_columns(id),
+                        target_column_id INTEGER REFERENCES file_columns(id),
+                        mapping_note TEXT
+                    )
+                `);
+
+                await client.query(`
+                    CREATE TABLE IF NOT EXISTS validation_results (
+                        id SERIAL PRIMARY KEY,
+                        project_id INTEGER REFERENCES validation_projects(id) ON DELETE CASCADE,
+                        column_mapping_id INTEGER REFERENCES column_mappings(id),
+                        error_message TEXT,
+                        actual_value TEXT,
+                        expected_value TEXT,
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                `);
+
+                console.log('PostgreSQL tables initialized successfully.');
+            } finally {
+                client.release();
+            }
+        } catch (err: any) {
+            console.error('Failed to initialize PostgreSQL:', err);
+            if (process.env.DATABASE_URL) throw err;
         }
     }
 
