@@ -268,6 +268,9 @@ app.post('/api/projects/:id/mappings', async (req, res) => {
 
 // 7. Auto-Map & Global Discovery (Smart Discovery)
 app.post('/api/projects/:id/auto-map', async (req, res) => {
+    // Force JSON response
+    res.setHeader('Content-Type', 'application/json');
+
     const projectId = req.params.id;
     const { sourceFileId, targetFileId } = req.body; // Optional: restrict to pair if user wants
 
@@ -275,6 +278,8 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
     const log = (msg: string) => { console.log(msg); debugLogs.push(msg); };
 
     try {
+        log(`Starting auto-map for project ${projectId}`);
+
         // 1. Fetch all files
         const allFiles = await db.query("SELECT * FROM imported_files WHERE project_id = ?", [projectId]);
         const targets = allFiles.filter((f: any) => f.file_type === 'target' && (!targetFileId || f.id === targetFileId));
