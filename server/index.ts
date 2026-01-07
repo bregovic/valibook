@@ -612,13 +612,12 @@ app.post('/api/projects/:id/validate', async (req, res) => {
             // DETERMINE SCOPE COLUMN IN SOURCE (FK Check)
             let sourceScopeColIdx = -1;
             if (allowedScopeKeys && scopeKeyColName) {
-                const normalize = (s: string) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
-                // Try to find column with same name as Logic Scope Key
-                sourceScopeColIdx = sourceHeaders.findIndex((h: string) => normalize(h) === normalize(scopeKeyColName));
             }
 
-            // Build Maps
+            // Build Maps & Check Duplicates
             const sourceMap = new Map<string, any[]>();
+            let duplicatesFound = 0;
+            let exampleDuplicate = '';
 
             // Fill Source Map (with Filtering)
             for (let i = 1; i < sourceRows.length; i++) {
@@ -631,7 +630,24 @@ app.post('/api/projects/:id/validate', async (req, res) => {
                 }
 
                 const k = String(r[sourceKeyIdx]).trim();
-                if (k) sourceMap.set(k, r);
+                if (!k) continue; // Skip empty keys
+
+                if (sourceMap.has(k)) {
+                    duplicatesFound++;
+                    if (!exampleDuplicate) exampleDuplicate = k;
+                } else {
+                    sourceMap.set(k, r);
+                }
+            }
+
+            if (duplicatesFound > 0) {
+                results.push({
+                    key: 'setup',
+                    type: 'error',
+                    message: `Primary Key '${getCol(keyMapping.source_column_id)?.column_name}' is NOT unique. Found ${duplicatesFound} duplicates (e.g. '${exampleDuplicate}'). Validation aborted for this file.`,
+                    file: fileLabel
+                });
+                continue; // Skip comparing this file pair
             }
 
             const targetMap = new Map<string, any[]>();
