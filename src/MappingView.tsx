@@ -94,11 +94,37 @@ export default function MappingView({ projectId, files, onBack, onNext }: Props)
         setLoading(false);
     };
 
-    const handleAutoMap = async () => {
+    const handleGlobalDiscovery = async () => {
+        if (!confirm("This will scan ALL files and attempt to automatically find relationships and mappings. Existing mappings might be overwritten.\n\nContinue?")) return;
+
+        setLoading(true);
+        try {
+            const res = await fetch(`/api/projects/${projectId}/auto-map`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({}) // No specific IDs = Global Discovery
+            });
+            const data = await res.json();
+
+            if (data.mappings) {
+                // Refresh local state
+                await fetchMappings();
+                alert(`Magic Discovery Complete!\n\nFound ${data.mappings.length} column relationships across all files.`);
+            } else {
+                alert('Discovery finished. Check console logs.');
+            }
+        } catch (e) {
+            console.error(e);
+            alert('Discovery failed');
+        }
+        setLoading(false);
+    };
+
+    const handleAutoMapPair = async () => {
         if (!selectedSourceFileId || !selectedTargetFileId) return;
 
+        setLoading(true);
         try {
-            // New: Send explicit context for auto-mapping
             const res = await fetch(`/api/projects/${projectId}/auto-map`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -110,33 +136,21 @@ export default function MappingView({ projectId, files, onBack, onNext }: Props)
             const data = await res.json();
 
             if (data.logs) {
-                console.groupCollapsed('Auto-Map Debug Logs');
+                console.groupCollapsed('Auto-Map Pair Logs');
                 data.logs.forEach((l: string) => console.log(l));
                 console.groupEnd();
             }
 
             if (data.mappings && data.mappings.length > 0) {
-                // Merge new mappings with existing ones (don't lose mappings from other files)
-                setMappings(prev => {
-                    const next = [...prev];
-                    data.mappings.forEach((newMap: Mapping) => {
-                        const idx = next.findIndex(m => m.sourceColumnId === newMap.sourceColumnId);
-                        if (idx >= 0) {
-                            next[idx] = newMap; // Overwrite
-                        } else {
-                            next.push(newMap);
-                        }
-                    });
-                    return next;
-                });
-                alert(`Auto-mapped ${data.mappings.length} columns for this file pair.`);
+                await fetchMappings(); // Refresh fully
+                alert(`Auto-mapped ${data.mappings.length} columns for this pair.`);
             } else {
-                alert('Auto-map finished but found 0 matches for this pair.\nCheck console for details.');
+                alert('No matches found for this specific file pair.');
             }
         } catch (e) {
             console.error('Auto-map error:', e);
-            alert('Auto-map failed. See console.');
         }
+        setLoading(false);
     };
 
     const updateMapping = (sourceId: number, updates: Partial<Mapping>) => {
@@ -175,7 +189,12 @@ export default function MappingView({ projectId, files, onBack, onNext }: Props)
             <div className="header-actions" style={{ flexDirection: 'column', gap: '1rem', alignItems: 'stretch' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                     <button onClick={onBack} className="secondary"> &larr; Back </button>
-                    <h2 style={{ border: 0, margin: 0, fontSize: '1.2rem' }}>Relation & Column Mapping</h2>
+                    <div style={{ textAlign: 'center' }}>
+                        <h2 style={{ border: 0, margin: 0, fontSize: '1.2rem' }}>Relation & Column Mapping</h2>
+                        <button onClick={handleGlobalDiscovery} className="magic-button" style={{ marginTop: '0.5rem', fontSize: '0.9rem', padding: '0.4rem 1rem' }}>
+                            ✨ Magic Auto-Discover (Scan All Files)
+                        </button>
+                    </div>
                     <button onClick={saveMappings} className="primary">Save & Validate &rarr;</button>
                 </div>
 
@@ -217,8 +236,8 @@ export default function MappingView({ projectId, files, onBack, onNext }: Props)
                 </div>
 
                 <div style={{ textAlign: 'right' }}>
-                    <button onClick={handleAutoMap} className="secondary" style={{ color: 'var(--warning)', borderColor: 'var(--warning)' }}>
-                        Auto Map this Pair
+                    <button onClick={handleAutoMapPair} className="secondary" style={{ fontSize: '0.85em' }}>
+                        Scan only this pair
                     </button>
                 </div>
             </div>
