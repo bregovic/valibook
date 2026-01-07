@@ -222,24 +222,24 @@ export default function MappingView({ projectId, files, onBack, onNext, scopeFil
                 </div>
             </div>
 
-            {/* Scope Selection */}
-            <div style={{ margin: '1rem 0', padding: '0.8rem', border: '1px solid var(--primary)', borderRadius: '6px', background: 'rgba(99, 102, 241, 0.05)' }}>
+            {/* Scope Selection - Optional */}
+            <div style={{ margin: '1rem 0', padding: '0.8rem', border: '1px dashed var(--border)', borderRadius: '6px', background: 'transparent' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                    <label style={{ fontWeight: 'bold', color: 'var(--primary)' }}>🎯 Validation Scope:</label>
+                    <label style={{ fontWeight: 500, color: 'var(--text-muted)', fontSize: '0.9rem' }}>🎯 Scope (Optional):</label>
                     <select
                         value={scopeFileId || ''}
                         onChange={(e) => setScopeFileId(e.target.value ? Number(e.target.value) : null)}
                         className="input-field"
                         style={{ flex: 1, minWidth: '200px' }}
                     >
-                        <option value="">-- Validate ALL Records --</option>
+                        <option value="">All Records (No Filter)</option>
                         {targetFiles.map(f => (
-                            <option key={f.id} value={f.id}>Only IDs in: {f.original_filename}</option>
+                            <option key={f.id} value={f.id}>Only records linked to: {f.original_filename}</option>
                         ))}
                     </select>
                 </div>
-                <div style={{ fontSize: '0.8em', color: 'var(--text-muted)', marginTop: '4px' }}>
-                    Select a Master Export file to limit validation scope.
+                <div style={{ fontSize: '0.75em', color: 'var(--text-muted)', marginTop: '4px' }}>
+                    Leave empty to validate everything. Select a file to skip source records not linked to that export.
                 </div>
             </div>
 
