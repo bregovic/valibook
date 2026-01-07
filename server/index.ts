@@ -85,8 +85,22 @@ app.post('/api/projects/:id/files', upload.single('file'), async (req, res) => {
         const fileId = fileInfo.id;
 
         // 2. Parse Columns (Robust)
+        let parseWarning = null;
         try {
+            if (!fs.existsSync(filePath)) {
+                throw new Error(`File not found at path: ${filePath}`);
+            }
+
+            const stats = fs.statSync(filePath);
+            if (stats.size === 0) {
+                throw new Error('File is empty (0 bytes)');
+            }
+
             const workbook = XLSX.readFile(filePath);
+            if (!workbook.SheetNames.length) {
+                throw new Error('Excel file has no sheets');
+            }
+
             const sheetName = workbook.SheetNames[0];
             const sheet = workbook.Sheets[sheetName];
 
@@ -95,23 +109,25 @@ app.post('/api/projects/:id/files', upload.single('file'), async (req, res) => {
 
             if (jsonData && jsonData.length > 0) {
                 const headers = jsonData[0];
+                // If only 1 row, samples will be empty but headers are valid
                 const firstRow = jsonData.length > 1 ? jsonData[1] : [];
 
                 for (let idx = 0; idx < headers.length; idx++) {
                     const name = String(headers[idx] || `Column ${idx + 1}`).trim();
-                    const sample = String(firstRow[idx] || '').substring(0, 100); // Limit sample length
+                    const sample = String(firstRow[idx] || '').substring(0, 100);
 
                     await db.run('INSERT INTO file_columns (file_id, column_name, column_index, sample_value) VALUES (?, ?, ?, ?)',
                         [fileId, name, idx, sample]);
                 }
+            } else {
+                parseWarning = 'Excel sheet appears to be empty or could not be parsed as array.';
             }
         } catch (parseErr) {
             console.error('Error parsing Excel columns:', parseErr);
-            // We do NOT re-throw, so the file remains uploaded even if parsing fails partially.
-            // Client will see "0 columns" which is better than 500 error.
+            parseWarning = `Failed to parse columns: ${(parseErr as Error).message}`;
         }
 
-        res.json({ success: true, fileId });
+        res.json({ success: true, fileId, warning: parseWarning });
     } catch (error) {
         console.error('Upload critical error:', error);
         res.status(500).json({ error: (error as Error).message });

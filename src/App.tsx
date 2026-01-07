@@ -77,10 +77,17 @@ function App() {
       // Upload each file individually (simplest for current API structure)
       // Alternatively, backend could be updated to accept array of files, but single calls are safer for progress/errors.
       try {
-        await fetch(`/api/projects/${selectedProjectId}/files`, {
+        const res = await fetch(`/api/projects/${selectedProjectId}/files`, {
           method: 'POST',
           body: formData
         });
+        const data = await res.json();
+
+        if (data.error) {
+          alert(`Error uploading file ${file.name}: ${data.error}`);
+        } else if (data.warning) {
+          alert(`Warning for file ${file.name}: ${data.warning}`);
+        }
       } catch (err) {
         console.error('Upload error', err);
       }
