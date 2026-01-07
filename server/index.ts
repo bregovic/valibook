@@ -2,8 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import multer from 'multer';
-import { initDatabase } from './database.js';
-import db from './database.js';
+import db from './db.js';
 import * as XLSX from 'xlsx';
 import fs from 'fs';
 
@@ -14,7 +13,7 @@ app.use(cors());
 app.use(express.json());
 
 // Initialize Database
-initDatabase();
+db.init();
 
 // Multer setup for file uploads
 const UPLOADS_DIR = process.env.UPLOADS_DIR || 'uploads/';
@@ -41,9 +40,9 @@ app.get('/health', (req, res) => {
 });
 
 // 1. Get all projects
-app.get('/api/projects', (req, res) => {
+app.get('/api/projects', async (req, res) => {
     try {
-        const projects = db.prepare('SELECT * FROM validation_projects ORDER BY created_at DESC').all();
+        const projects = await db.query('SELECT * FROM validation_projects ORDER BY created_at DESC');
         res.json(projects);
     } catch (error) {
         res.status(500).json({ error: (error as Error).message });
@@ -51,20 +50,20 @@ app.get('/api/projects', (req, res) => {
 });
 
 // 2. Create new project
-app.post('/api/projects', (req, res) => {
+app.post('/api/projects', async (req, res) => {
     const { name, description } = req.body;
     if (!name) return res.status(400).json({ error: 'Project name is required' });
 
     try {
-        const info = db.prepare('INSERT INTO validation_projects (name, description) VALUES (?, ?)').run(name, description || '');
-        res.json({ id: info.lastInsertRowid, name, description });
+        const result = await db.run('INSERT INTO validation_projects (name, description) VALUES (?, ?)', [name, description || '']);
+        res.json({ id: result.id, name, description });
     } catch (error) {
         res.status(500).json({ error: (error as Error).message });
     }
 });
 
 // 3. Upload File & Analyze Columns
-app.post('/api/projects/:id/files', upload.single('file'), (req, res) => {
+app.post('/api/projects/:id/files', upload.single('file'), async (req, res) => {
     const projectId = req.params.id;
     const fileType = req.body.fileType; // 'source' | 'target' | 'codebook'
 
@@ -77,9 +76,9 @@ app.post('/api/projects/:id/files', upload.single('file'), (req, res) => {
         const filePath = req.file.path;
 
         // Insert file record
-        const fileStmt = db.prepare('INSERT INTO imported_files (project_id, original_filename, file_type, stored_filename) VALUES (?, ?, ?, ?)');
-        const fileInfo = fileStmt.run(projectId, req.file.originalname, fileType, filePath);
-        const fileId = fileInfo.lastInsertRowid;
+        const fileInfo = await db.run('INSERT INTO imported_files (project_id, original_filename, file_type, stored_filename) VALUES (?, ?, ?, ?)',
+            [projectId, req.file.originalname, fileType, filePath]);
+        const fileId = fileInfo.id;
 
         // Parse Columns using XLSX
         const workbook = XLSX.readFile(filePath);
@@ -93,19 +92,12 @@ app.post('/api/projects/:id/files', upload.single('file'), (req, res) => {
             const headers = jsonData[0];
             const firstRow = jsonData.length > 1 ? jsonData[1] : [];
 
-            const insertCol = db.prepare('INSERT INTO file_columns (file_id, column_name, column_index, sample_value) VALUES (?, ?, ?, ?)');
-            const insertMany = db.transaction((columns) => {
-                for (const col of columns) insertCol.run(col.fileId, col.name, col.index, col.sample);
-            });
-
-            const columnsToInsert = headers.map((h, idx) => ({
-                fileId,
-                name: String(h || `Column ${idx + 1}`),
-                index: idx,
-                sample: String(firstRow[idx] || '')
-            }));
-
-            insertMany(columnsToInsert);
+            for (let idx = 0; idx < headers.length; idx++) {
+                const name = String(headers[idx] || `Column ${idx + 1}`);
+                const sample = String(firstRow[idx] || '');
+                await db.run('INSERT INTO file_columns (file_id, column_name, column_index, sample_value) VALUES (?, ?, ?, ?)',
+                    [fileId, name, idx, sample]);
+            }
         }
 
         res.json({ success: true, fileId });
@@ -116,12 +108,12 @@ app.post('/api/projects/:id/files', upload.single('file'), (req, res) => {
 });
 
 // 4. Get Project Files and Columns
-app.get('/api/projects/:id/details', (req, res) => {
+app.get('/api/projects/:id/details', async (req, res) => {
     try {
-        const files = db.prepare('SELECT * FROM imported_files WHERE project_id = ?').all(req.params.id) as any[];
+        const files = await db.query('SELECT * FROM imported_files WHERE project_id = ?', [req.params.id]);
 
         for (const file of files) {
-            file.columns = db.prepare('SELECT * FROM file_columns WHERE file_id = ? ORDER BY column_index').all(file.id);
+            file.columns = await db.query('SELECT * FROM file_columns WHERE file_id = ? ORDER BY column_index', [file.id]);
         }
 
         res.json({ files });
@@ -131,9 +123,9 @@ app.get('/api/projects/:id/details', (req, res) => {
 });
 
 // 5. Get Mappings
-app.get('/api/projects/:id/mappings', (req, res) => {
+app.get('/api/projects/:id/mappings', async (req, res) => {
     try {
-        const mappings = db.prepare(`
+        const mappings = await db.query(`
             SELECT m.*, 
                    sc.column_name as source_name, sc.sample_value as source_sample,
                    tc.column_name as target_name, tc.sample_value as target_sample
@@ -141,7 +133,7 @@ app.get('/api/projects/:id/mappings', (req, res) => {
             LEFT JOIN file_columns sc ON m.source_column_id = sc.id
             LEFT JOIN file_columns tc ON m.target_column_id = tc.id
             WHERE m.project_id = ?
-        `).all(req.params.id);
+        `, [req.params.id]);
         res.json(mappings);
     } catch (error) {
         res.status(500).json({ error: (error as Error).message });
@@ -149,7 +141,7 @@ app.get('/api/projects/:id/mappings', (req, res) => {
 });
 
 // 6. Save Mappings
-app.post('/api/projects/:id/mappings', (req, res) => {
+app.post('/api/projects/:id/mappings', async (req, res) => {
     const projectId = req.params.id;
     const { mappings } = req.body; // Array of { sourceColumnId, targetColumnId, note }
 
@@ -158,17 +150,13 @@ app.post('/api/projects/:id/mappings', (req, res) => {
     }
 
     try {
-        const deleteStmt = db.prepare('DELETE FROM column_mappings WHERE project_id = ?');
-        const insertStmt = db.prepare('INSERT INTO column_mappings (project_id, source_column_id, target_column_id, mapping_note) VALUES (?, ?, ?, ?)');
+        await db.run('DELETE FROM column_mappings WHERE project_id = ?', [projectId]);
 
-        const saveTransaction = db.transaction((mappingList) => {
-            deleteStmt.run(projectId);
-            for (const m of mappingList) {
-                insertStmt.run(projectId, m.sourceColumnId, m.targetColumnId, m.note || '');
-            }
-        });
+        for (const m of mappings) {
+            await db.run('INSERT INTO column_mappings (project_id, source_column_id, target_column_id, mapping_note) VALUES (?, ?, ?, ?)',
+                [projectId, m.sourceColumnId, m.targetColumnId, m.note || '']);
+        }
 
-        saveTransaction(mappings);
         res.json({ success: true });
     } catch (error) {
         res.status(500).json({ error: (error as Error).message });
@@ -176,19 +164,19 @@ app.post('/api/projects/:id/mappings', (req, res) => {
 });
 
 // 7. Auto-Map Columns (Helper)
-app.post('/api/projects/:id/auto-map', (req, res) => {
+app.post('/api/projects/:id/auto-map', async (req, res) => {
     const projectId = req.params.id;
     try {
         // Get source and target files
-        const sourceFile = db.prepare("SELECT id FROM imported_files WHERE project_id = ? AND file_type = 'source' LIMIT 1").get(projectId) as any;
-        const targetFile = db.prepare("SELECT id FROM imported_files WHERE project_id = ? AND file_type = 'target' LIMIT 1").get(projectId) as any;
+        const sourceFile = await db.get("SELECT id FROM imported_files WHERE project_id = ? AND file_type = 'source' LIMIT 1", [projectId]);
+        const targetFile = await db.get("SELECT id FROM imported_files WHERE project_id = ? AND file_type = 'target' LIMIT 1", [projectId]);
 
         if (!sourceFile || !targetFile) {
             return res.status(400).json({ error: 'Source or Target file missing' });
         }
 
-        const sourceCols = db.prepare('SELECT * FROM file_columns WHERE file_id = ?').all(sourceFile.id) as any[];
-        const targetCols = db.prepare('SELECT * FROM file_columns WHERE file_id = ?').all(targetFile.id) as any[];
+        const sourceCols = await db.query('SELECT * FROM file_columns WHERE file_id = ?', [sourceFile.id]);
+        const targetCols = await db.query('SELECT * FROM file_columns WHERE file_id = ?', [targetFile.id]);
 
         const newMappings = [];
 
@@ -215,28 +203,26 @@ app.post('/api/projects/:id/auto-map', (req, res) => {
 });
 
 // 8. Validate Project
-app.post('/api/projects/:id/validate', (req, res) => {
+app.post('/api/projects/:id/validate', async (req, res) => {
     const projectId = req.params.id;
 
     try {
         // Fetch files
-        const sourceFile = db.prepare("SELECT * FROM imported_files WHERE project_id = ? AND file_type = 'source' LIMIT 1").get(projectId) as any;
-        const targetFile = db.prepare("SELECT * FROM imported_files WHERE project_id = ? AND file_type = 'target' LIMIT 1").get(projectId) as any;
+        const sourceFile = await db.get("SELECT * FROM imported_files WHERE project_id = ? AND file_type = 'source' LIMIT 1", [projectId]);
+        const targetFile = await db.get("SELECT * FROM imported_files WHERE project_id = ? AND file_type = 'target' LIMIT 1", [projectId]);
 
         if (!sourceFile || !targetFile) {
             return res.status(400).json({ error: 'Missing source or target file' });
         }
 
         // Fetch Mappings
-        const mappings = db.prepare('SELECT * FROM column_mappings WHERE project_id = ?').all(projectId) as any[];
+        const mappings = await db.query('SELECT * FROM column_mappings WHERE project_id = ?', [projectId]);
 
         // Identify Key Column
         let keyMapping = mappings.find(m => {
             try { return JSON.parse(m.mapping_note || '{}').isKey; } catch (e) { return false; }
         });
 
-        // If no key explicitly marked, try to find a mapped column named 'id' or similar, or fail
-        // For this MVP, we REQUIRE a key.
         if (!keyMapping) {
             return res.status(400).json({ error: 'No Primary Key defined in mappings. Please select a Key column.' });
         }
@@ -252,8 +238,8 @@ app.post('/api/projects/:id/validate', (req, res) => {
             };
         });
 
-        const sourceColInfo = db.prepare('SELECT * FROM file_columns WHERE file_id = ?').all(sourceFile.id) as any[];
-        const targetColInfo = db.prepare('SELECT * FROM file_columns WHERE file_id = ?').all(targetFile.id) as any[];
+        const sourceColInfo = await db.query('SELECT * FROM file_columns WHERE file_id = ?', [sourceFile.id]);
+        const targetColInfo = await db.query('SELECT * FROM file_columns WHERE file_id = ?', [targetFile.id]);
 
         // Helper to get column index by ID
         const getIdx = (colId: number, info: any[]) => info.find(c => c.id === colId)?.column_index;
@@ -265,7 +251,7 @@ app.post('/api/projects/:id/validate', (req, res) => {
             return res.status(400).json({ error: 'Key columns not found in file definitions' });
         }
 
-        // Load Data (Memory intensive for large files, but ok for MVP)
+        // Load Data
         const readSheet = (path: string) => {
             const wb = XLSX.readFile(path);
             return XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' }) as any[][];
@@ -287,12 +273,12 @@ app.post('/api/projects/:id/validate', (req, res) => {
 
         // Codebook Caches
         const codebookCache = new Map<number, Set<string>>();
-        const getCodebookValues = (cbId: number) => {
+        const getCodebookValues = async (cbId: number) => {
             if (!codebookCache.has(cbId)) {
-                const cbFile = db.prepare("SELECT * FROM imported_files WHERE id = ?").get(cbId) as any;
+                const cbFile = await db.get("SELECT * FROM imported_files WHERE id = ?", [cbId]);
                 if (cbFile) {
                     const rows = readSheet(cbFile.stored_filename) as any[][];
-                    // Assume codebook values are in first column, start from row 1 (skip header)
+                    // Assume codebook values are in first column
                     const values = new Set(rows.slice(1).map(r => String(r[0])));
                     codebookCache.set(cbId, values);
                 } else {
@@ -335,9 +321,9 @@ app.post('/api/projects/:id/validate', (req, res) => {
                                 });
                             }
 
-                            // Check Codebook
+                            // Check Codebook via async helper - inefficient loop, but valid for now
                             if (cfg.codebookId) {
-                                const allowed = getCodebookValues(cfg.codebookId);
+                                const allowed = await getCodebookValues(cfg.codebookId);
                                 if (!allowed.has(tVal) && tVal !== '') {
                                     results.push({
                                         key,
@@ -354,7 +340,7 @@ app.post('/api/projects/:id/validate', (req, res) => {
             }
         }
 
-        // 2. Check Extra in Target (optional)
+        // 2. Check Extra in Target
         for (const [key] of targetMap) {
             if (!sourceMap.has(key)) {
                 results.push({
@@ -365,20 +351,14 @@ app.post('/api/projects/:id/validate', (req, res) => {
             }
         }
 
-        // Save results to DB (validation_results) 
-        // For MVP, just returning JSON
+        // Clean old results
+        await db.run('DELETE FROM validation_results WHERE project_id = ?', [projectId]);
 
-        // Log last run
-        const deleteRes = db.prepare('DELETE FROM validation_results WHERE project_id = ?');
-        const insertRes = db.prepare('INSERT INTO validation_results (project_id, column_mapping_id, error_message, actual_value, expected_value) VALUES (?, ?, ?, ?, ?)');
-
-        db.transaction(() => {
-            deleteRes.run(projectId);
-            for (const r of results) {
-                // We'll simplify the schema usage here slightly for speed
-                insertRes.run(projectId, null, `${r.type}: ${r.message || ''} (Key: ${r.key})`, r.actual || '', r.expected || '');
-            }
-        })();
+        // Save new results (limit batch size in real app, here simple loop)
+        for (const r of results) {
+            await db.run('INSERT INTO validation_results (project_id, column_mapping_id, error_message, actual_value, expected_value) VALUES (?, ?, ?, ?, ?)',
+                [projectId, null, `${r.type}: ${r.message || ''} (Key: ${r.key})`, r.actual || '', r.expected || '']);
+        }
 
         res.json({ success: true, issuesCount: results.length, limit: 100, issues: results.slice(0, 100) });
 
@@ -401,3 +381,4 @@ if (process.env.NODE_ENV === 'production') {
 app.listen(Number(PORT), '0.0.0.0', () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
 });
+
