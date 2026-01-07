@@ -676,9 +676,23 @@ app.post('/api/projects/:id/validate', async (req, res) => {
     try {
         const mem = process.memoryUsage();
         serverLog(`Starting Auto-Map Project ${projectId}. Heap: ${Math.round(mem.heapUsed / 1024 / 1024)}MB`);
-        // Fetch all project files
+
+        // SURVIVAL TEST: Disable all heavy logic
+        // Verify DB connection only
         const allFiles = await db.query("SELECT * FROM imported_files WHERE project_id = ?", [projectId]);
+        serverLog(`DB Connection OK. Found ${allFiles.length} files.`);
+
+        res.json({
+            mappings: [],
+            logs: ["Survival test passed. Logic temporarily disabled to prevent crash."],
+            status: "disabled_for_debugging"
+        });
+        return;
+
+        /* LOGIC DISABLED
         serverLog(`Found ${allFiles.length} files for project ${projectId}`);
+        // ... (rest of logic commented out effectively by the return above)
+        */
         const getFile = (id: number) => allFiles.find((f: any) => f.id === id);
 
         // Fetch all mappings
