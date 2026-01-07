@@ -147,7 +147,6 @@ function App() {
       <header className="app-header">
         <div className="logo-section">
           <img src="/logo.png" alt="ValiBook Logo" className="app-logo" />
-          <h1>ValiBook <span className="beta-tag">BETA</span></h1>
         </div>
         <div className="user-section">
           {/* Placeholder for future user profile */}
