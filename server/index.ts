@@ -778,19 +778,16 @@ app.post('/api/projects/:id/validate', async (req, res) => {
         await db.run('DELETE FROM validation_results WHERE project_id = ?', [projectId]);
 
         // Batch insert (simplified loop)
-        const stmt = 'INSERT INTO validation_results (project_id, column_mapping_id, error_message, actual_value, expected_value, issue_type, issue_key, issue_file, issue_column) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)';
+        const stmt = 'INSERT INTO validation_results (project_id, column_mapping_id, error_message, actual_value, expected_value) VALUES (?, ?, ?, ?, ?)';
 
         for (const r of results) {
+            const fullMessage = `[${r.file || 'unknown'}] ${r.type}: ${r.column ? r.column + ' - ' : ''}${r.message} (Key: ${r.key})`;
             await db.run(stmt, [
                 projectId,
                 null,
-                r.message,
+                fullMessage,
                 r.actual || '',
-                r.expected || '',
-                r.type,
-                r.key,
-                r.file || '',
-                r.column || ''
+                r.expected || ''
             ]);
         }
 
