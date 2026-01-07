@@ -828,10 +828,10 @@ if (process.env.NODE_ENV === 'production') {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
 
-    // Catch-all for SPA routing - but NOT for /api routes!
-    app.get('*', (req, res, next) => {
+    // Catch-all for SPA routing - use middleware instead of route pattern
+    app.use((req, res, next) => {
         if (req.path.startsWith('/api')) {
-            return next(); // Let it 404 properly for unknown API routes
+            return next(); // Let API routes 404 properly
         }
         res.sendFile(path.join(distPath, 'index.html'));
     });
