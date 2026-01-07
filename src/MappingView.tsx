@@ -173,22 +173,43 @@ export default function MappingView({ projectId, files, onBack, onNext, scopeFil
         setDiscoveryLogs([]);
 
         try {
-            const res = await fetch(`/api/projects/${projectId}/auto-map`, { method: 'POST' });
-            const data = await res.json();
+            // Use AbortController for timeout (2 minutes)
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 120000);
+
+            const res = await fetch(`/api/projects/${projectId}/auto-map`, {
+                method: 'POST',
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+
+            const text = await res.text();
+            let data;
+            try {
+                data = JSON.parse(text);
+            } catch {
+                console.error('Invalid JSON response:', text.substring(0, 200));
+                throw new Error('Server returned invalid response. Try again.');
+            }
 
             if (data.logs) setDiscoveryLogs(data.logs);
 
             if (data.error) {
                 alert(`Discovery Error: ${data.error}`);
             } else {
-                // Reload relations
-                await loadRelations();
                 alert(`Discovery complete!\n\nFound ${data.mappings?.length || 0} column mappings.`);
             }
         } catch (e: any) {
             console.error(e);
-            alert(`Discovery failed: ${e.message || 'Unknown error'}`);
+            if (e.name === 'AbortError') {
+                alert('Discovery timed out. The data may still be saved - reloading...');
+            } else {
+                alert(`Discovery issue: ${e.message || 'Unknown error'}. Reloading existing data...`);
+            }
         }
+
+        // Always reload relations after attempt (even if error)
+        await loadRelations();
         setLoading(false);
     };
 
