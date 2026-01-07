@@ -997,6 +997,16 @@ app.post('/api/projects/:id/validate', async (req, res) => {
     }
 });
 
+app.get('/api/debug/rows/:fileId', async (req, res) => {
+    try {
+        const fileId = req.params.fileId;
+        const countRes = await db.query('SELECT COUNT(*) as c FROM imported_file_rows WHERE file_id = ?', [fileId]);
+        res.json({ count: countRes[0].c });
+    } catch (e) {
+        res.status(500).json({ error: (e as Error).message });
+    }
+});
+
 // Serve static frontend in production
 if (process.env.NODE_ENV === 'production') {
     const distPath = path.join(process.cwd(), 'dist');
