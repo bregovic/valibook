@@ -280,13 +280,21 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
     const { sourceFileId, targetFileId } = req.body; // Optional: restrict to pair if user wants
 
     const debugLogs: string[] = [];
-    const log = (msg: string) => { console.log(msg); debugLogs.push(msg); };
+    const log = (msg: string) => { console.log(`[auto-map] ${msg}`); debugLogs.push(msg); };
 
     try {
         log(`Starting auto-map for project ${projectId}`);
 
         // 1. Fetch all files
-        const allFiles = await db.query("SELECT * FROM imported_files WHERE project_id = ?", [projectId]);
+        let allFiles: any[];
+        try {
+            allFiles = await db.query("SELECT * FROM imported_files WHERE project_id = ?", [projectId]);
+            log(`Found ${allFiles.length} files`);
+        } catch (dbErr: any) {
+            log(`DB Error: ${dbErr.message}`);
+            return res.status(500).json({ error: `Database error: ${dbErr.message}`, logs: debugLogs });
+        }
+
         const targets = allFiles.filter((f: any) => f.file_type === 'target' && (!targetFileId || f.id === targetFileId));
         const sources = allFiles.filter((f: any) => f.file_type === 'source' && (!sourceFileId || f.id === sourceFileId));
         const codebooks = allFiles.filter((f: any) => f.file_type === 'codebook');
