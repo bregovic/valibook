@@ -840,6 +840,79 @@ app.post('/api/projects/:id/validate', async (req, res) => {
             }
         } // end loop
 
+        // ===========================================
+        // EXCLUSION LIST VALIDATION
+        // Check if export files contain forbidden values from 'exclusion' files
+        // ===========================================
+        const exclusionFiles = allFiles.filter((f: any) => f.file_type === 'exclusion');
+
+        if (exclusionFiles.length > 0) {
+            console.log(`[Validation] Checking ${exclusionFiles.length} exclusion file(s)...`);
+
+            // Build exclusion sets (column name -> forbidden values)
+            const exclusionMap = new Map<string, Set<string>>();
+
+            for (const exFile of exclusionFiles) {
+                const exRows = readSheet(exFile.stored_filename);
+                if (exRows.length < 2) continue;
+
+                const headers = exRows[0] as string[];
+
+                // Each column in exclusion file is a separate exclusion list
+                for (let colIdx = 0; colIdx < headers.length; colIdx++) {
+                    const colName = String(headers[colIdx]).trim().toLowerCase();
+                    if (!colName) continue;
+
+                    if (!exclusionMap.has(colName)) {
+                        exclusionMap.set(colName, new Set());
+                    }
+
+                    // Add all values from this column
+                    for (let r = 1; r < exRows.length; r++) {
+                        const val = String(exRows[r][colIdx]).trim();
+                        if (val) exclusionMap.get(colName)!.add(val);
+                    }
+                }
+            }
+
+            console.log(`[Validation] Loaded exclusion lists for columns: ${Array.from(exclusionMap.keys()).join(', ')}`);
+
+            // Check each Target (Export) file against exclusions
+            const targetFiles = allFiles.filter((f: any) => f.file_type === 'target');
+
+            for (const tFile of targetFiles) {
+                const tRows = readSheet(tFile.stored_filename);
+                if (tRows.length < 2) continue;
+
+                const headers = tRows[0] as string[];
+
+                // Check each column that has an exclusion list
+                for (let colIdx = 0; colIdx < headers.length; colIdx++) {
+                    const colName = String(headers[colIdx]).trim().toLowerCase();
+
+                    if (!exclusionMap.has(colName)) continue;
+
+                    const forbiddenValues = exclusionMap.get(colName)!;
+
+                    // Check each row in export
+                    for (let r = 1; r < tRows.length; r++) {
+                        const val = String(tRows[r][colIdx]).trim();
+
+                        if (val && forbiddenValues.has(val)) {
+                            results.push({
+                                key: `row_${r}`,
+                                type: 'exclusion_violation',
+                                message: `Forbidden value '${val}' found in column '${headers[colIdx]}'`,
+                                file: tFile.original_filename,
+                                column: headers[colIdx],
+                                actual: val
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
         // Clean & Save Results
         await db.run('DELETE FROM validation_results WHERE project_id = ?', [projectId]);
 

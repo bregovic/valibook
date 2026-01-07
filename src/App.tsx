@@ -42,7 +42,7 @@ function App() {
 
   interface FileInfo {
     id: number;
-    file_type: 'source' | 'target' | 'codebook';
+    file_type: 'source' | 'target' | 'codebook' | 'exclusion';
     original_filename: string;
     columns: { id: number, column_name: string, sample_value: string }[];
   }
@@ -65,7 +65,7 @@ function App() {
   };
 
   // Handle multiple file uploads
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'source' | 'target' | 'codebook') => {
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'source' | 'target' | 'codebook' | 'exclusion') => {
     if (!selectedProjectId || !e.target.files) return;
 
     // Iterate over all selected files
@@ -112,7 +112,7 @@ function App() {
     if (selectedProjectId) fetchProjectDetails(selectedProjectId);
   };
 
-  const handleBulkDelete = async (type?: 'source' | 'target' | 'codebook') => {
+  const handleBulkDelete = async (type?: 'source' | 'target' | 'codebook' | 'exclusion') => {
     const msg = type
       ? `Are you sure you want to delete ALL ${type.toUpperCase()} files?\nThis will remove related mappings.`
       : 'Are you sure you want to delete ALL files in this project?';
@@ -129,7 +129,7 @@ function App() {
   };
 
   /* Helper to render upload cards */
-  const renderFileSection = (type: 'source' | 'target' | 'codebook', title: string) => {
+  const renderFileSection = (type: 'source' | 'target' | 'codebook' | 'exclusion', title: string) => {
     const files = projectFiles.filter(f => f.file_type === type);
 
     return (
@@ -251,6 +251,10 @@ function App() {
               <div className="upload-grid">
                 {renderFileSection('source', '1. Source File (Source of Truth)')}
                 {renderFileSection('target', '2. Target File (Export to Check)')}
+              </div>
+
+              <div className="upload-grid" style={{ marginTop: '1rem' }}>
+                {renderFileSection('exclusion', '3. Exclusion List (Forbidden Values - Optional)')}
               </div>
             </div>
           )}
