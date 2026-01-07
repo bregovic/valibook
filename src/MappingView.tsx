@@ -74,13 +74,25 @@ export default function MappingView({ projectId, files, onBack, onNext }: Props)
     };
 
     const handleAutoMap = async () => {
-        const res = await fetch(`/api/projects/${projectId}/auto-map`, { method: 'POST' });
-        const data = await res.json();
-        if (data.mappings) {
-            // Merge with existing logic: exact overwrite or partial?
-            // Let's just set them for now.
-            setMappings(data.mappings);
-            alert(`Auto-mapped ${data.mappings.length} columns.`);
+        try {
+            const res = await fetch(`/api/projects/${projectId}/auto-map`, { method: 'POST' });
+            const data = await res.json();
+
+            if (data.logs) {
+                console.groupCollapsed('Auto-Map Debug Logs');
+                data.logs.forEach((l: string) => console.log(l));
+                console.groupEnd();
+            }
+
+            if (data.mappings && data.mappings.length > 0) {
+                setMappings(data.mappings);
+                alert(`Auto-mapped ${data.mappings.length} columns.`);
+            } else {
+                alert('Auto-map finished but found 0 matches.\n\nCheck browser console (F12) for detailed matching logs to see why.');
+            }
+        } catch (e) {
+            console.error('Auto-map error:', e);
+            alert('Auto-map failed. See console.');
         }
     };
 

@@ -260,6 +260,9 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
         // Helper to normalize for fuzzy name match
         const normalizeName = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 
+        const debugLogs: string[] = [];
+        const log = (msg: string) => { console.log(msg); debugLogs.push(msg); };
+
         // Algo: For each source column, verify samples against target columns
         for (const sCol of sourceColsDB) {
             const sIdx = sCol.column_index;
@@ -269,6 +272,7 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
 
             // 1. Pick random samples (up to 10)
             const samples = sValues.sort(() => 0.5 - Math.random()).slice(0, 10);
+            log(`Checking Source Col '${sCol.column_name}' with samples: ${JSON.stringify(samples)}`);
 
             let bestMatch = null;
             let bestScore = 0;
@@ -289,7 +293,11 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
 
                 // Bonus for name similarity
                 if (normalizeName(sCol.column_name) === normalizeName(tCol.column_name)) {
-                    score += 0.2;
+                    score += 0.3; // Higher bonus
+                }
+
+                if (score > 0) {
+                    log(` -> Match candidate '${tCol.column_name}': Score ${score.toFixed(2)} (${hits}/${samples.length} hits)`);
                 }
 
                 if (score > bestScore) {
@@ -298,17 +306,18 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
                 }
             }
 
-            // Threshold for suggestion (e.g. 60% match)
-            if (bestMatch && bestScore >= 0.6) {
+            // Lower threshold to 0.3 for investigation
+            if (bestMatch && bestScore >= 0.3) {
                 newMappings.push({
                     sourceColumnId: sCol.id,
                     targetColumnId: bestMatch.id,
                     note: `Auto-mapped (Score: ${Math.round(bestScore * 100)}%)`
                 });
+                log(` => MAPPED to '${bestMatch.column_name}'`);
             }
         }
 
-        res.json({ mappings: newMappings });
+        res.json({ mappings: newMappings, logs: debugLogs });
     } catch (error) {
         console.error('Auto-map error:', error);
         res.status(500).json({ error: (error as Error).message });

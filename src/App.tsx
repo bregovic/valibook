@@ -109,10 +109,15 @@ function App() {
           <div className="file-list">
             {files.map(file => (
               <div key={file.id} className="file-info fade-in" style={{ marginBottom: '0.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <div style={{ textAlign: 'left' }}>
+                <div style={{ textAlign: 'left', flex: 1, minWidth: 0, paddingRight: '10px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    <span>✅</span>
-                    <strong>{file.original_filename}</strong>
+                    <span style={{ flexShrink: 0 }}>✅</span>
+                    <strong style={{
+                      whiteSpace: 'nowrap',
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      display: 'block'
+                    }} title={file.original_filename}>{file.original_filename}</strong>
                   </div>
                   <div style={{ fontSize: '0.85rem', marginTop: '0.1rem', opacity: 0.7, color: 'var(--text)' }}>
                     {file.columns?.length || 0} columns detected
