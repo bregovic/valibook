@@ -47,7 +47,12 @@ class PostgresDB implements IDatabase {
     private pool: pg.Pool;
 
     constructor(connectionString: string) {
-        this.pool = new pg.Pool({ connectionString });
+        this.pool = new pg.Pool({
+            connectionString,
+            ssl: {
+                rejectUnauthorized: false // Required for many cloud Postgres providers (Railway, Heroku, etc.)
+            }
+        });
         console.log('Using PostgreSQL Database');
     }
 
