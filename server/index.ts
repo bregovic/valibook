@@ -308,16 +308,35 @@ app.post('/api/projects/:id/validate', async (req, res) => {
                         const tIdx = getIdx(cfg.targetId, targetColInfo);
 
                         if (sIdx !== undefined && tIdx !== undefined) {
+                            // Helper to normalize values for comparison (handles comma decimals)
+                            const normalizeVal = (val: any) => {
+                                if (val === undefined || val === null) return '';
+                                let str = String(val).trim();
+                                if (str === '') return '';
+                                // Check if it looks like a number with comma
+                                if (/^-?\d+,\d+$/.test(str)) {
+                                    str = str.replace(',', '.');
+                                }
+                                // Try to normalize floating point representation
+                                const num = Number(str);
+                                return isNaN(num) ? str : num;
+                            };
+
+                            const sValNorm = normalizeVal(sRow[sIdx]);
+                            const tValNorm = normalizeVal(tRow[tIdx]);
+
+                            // Define raw string values for reporting and codebook check
                             const sVal = String(sRow[sIdx]).trim();
                             const tVal = String(tRow[tIdx]).trim();
 
-                            if (sVal !== tVal) {
+                            // Strict check on normalized values (unless both are empty strings effectively)
+                            if (sValNorm !== tValNorm) {
                                 results.push({
                                     key,
                                     type: 'value_mismatch',
                                     column: sourceColInfo.find(c => c.id === cfg.sourceId)?.column_name,
-                                    expected: sVal,
-                                    actual: tVal
+                                    expected: String(sRow[sIdx]),
+                                    actual: String(tRow[tIdx])
                                 });
                             }
 

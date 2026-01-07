@@ -21,7 +21,8 @@
 }
 
 .app-logo {
-  height: 48px;
+  height: 96px;
+  /* Increased by 200% */
   /* Adjust based on your logo aspect ratio */
   width: auto;
 }

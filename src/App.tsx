@@ -63,44 +63,64 @@ function App() {
     setProjectFiles(data.files);
   };
 
+  // Handle multiple file uploads
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'source' | 'target' | 'codebook') => {
-    if (!selectedProjectId || !e.target.files?.[0]) return;
+    if (!selectedProjectId || !e.target.files) return;
 
-    const formData = new FormData();
-    formData.append('file', e.target.files[0]);
-    formData.append('fileType', type);
+    // Iterate over all selected files
+    for (let i = 0; i < e.target.files.length; i++) {
+      const file = e.target.files[i];
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('fileType', type);
 
-    const res = await fetch(`/api/projects/${selectedProjectId}/files`, {
-      method: 'POST',
-      body: formData
-    });
-
-    if (res.ok) {
-      fetchProjectDetails(selectedProjectId);
-    } else {
-      alert('Upload failed');
+      // Upload each file individually (simplest for current API structure)
+      // Alternatively, backend could be updated to accept array of files, but single calls are safer for progress/errors.
+      try {
+        await fetch(`/api/projects/${selectedProjectId}/files`, {
+          method: 'POST',
+          body: formData
+        });
+      } catch (err) {
+        console.error('Upload error', err);
+      }
     }
+
+    // Refresh project details after all uploads
+    fetchProjectDetails(selectedProjectId);
   };
 
   /* Helper to render upload cards */
   const renderFileSection = (type: 'source' | 'target' | 'codebook', title: string) => {
-    const file = projectFiles.find(f => f.file_type === type);
+    // Find all files of this type (we might want to show list if multiple allowed in future logic)
+    // For now, let's show the list of uploaded files for this section
+    const files = projectFiles.filter(f => f.file_type === type);
+
     return (
       <div className="upload-card">
         <h3>{title}</h3>
-        {file ? (
-          <div className="file-info fade-in">
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-              <span>✅</span>
-              <strong>{file.original_filename}</strong>
-            </div>
-            <div style={{ fontSize: '0.85rem', marginTop: '0.5rem', opacity: 0.7, color: 'var(--text)' }}>
-              {file.columns?.length || 0} columns detected
+        {files.length > 0 ? (
+          <div className="file-list">
+            {files.map(file => (
+              <div key={file.id} className="file-info fade-in" style={{ marginBottom: '0.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
+                  <span>✅</span>
+                  <strong>{file.original_filename}</strong>
+                </div>
+                <div style={{ fontSize: '0.85rem', marginTop: '0.1rem', opacity: 0.7, color: 'var(--text)' }}>
+                  {file.columns?.length || 0} columns detected
+                </div>
+              </div>
+            ))}
+            {/* Allow adding more files even if some exist */}
+            <div style={{ marginTop: '1rem', borderTop: '1px dashed var(--border)', paddingTop: '0.5rem' }}>
+              <small>Add more:</small>
+              <input className="file-input" type="file" multiple onChange={(e) => handleFileUpload(e, type)} />
             </div>
           </div>
         ) : (
           <div>
-            <input className="file-input" type="file" onChange={(e) => handleFileUpload(e, type)} />
+            <input className="file-input" type="file" multiple onChange={(e) => handleFileUpload(e, type)} />
           </div>
         )}
       </div>
