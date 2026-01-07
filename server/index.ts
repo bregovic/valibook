@@ -107,6 +107,32 @@ app.post('/api/projects/:id/files', upload.single('file'), async (req, res) => {
     }
 });
 
+// 3.1 Delete File
+app.delete('/api/files/:id', async (req, res) => {
+    try {
+        const fileId = req.params.id;
+        // Get file info first to delete physical file
+        const file = await db.get('SELECT * FROM imported_files WHERE id = ?', [fileId]);
+
+        if (file) {
+            // Delete from DB (cascade deletes columns)
+            await db.run('DELETE FROM imported_files WHERE id = ?', [fileId]);
+
+            // Try delete physical file
+            if (file.stored_filename && fs.existsSync(file.stored_filename)) {
+                try {
+                    fs.unlinkSync(file.stored_filename);
+                } catch (e) {
+                    console.warn('Could not delete file from disk', e);
+                }
+            }
+        }
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ error: (error as Error).message });
+    }
+});
+
 // 4. Get Project Files and Columns
 app.get('/api/projects/:id/details', async (req, res) => {
     try {

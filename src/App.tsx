@@ -90,6 +90,12 @@ function App() {
     fetchProjectDetails(selectedProjectId);
   };
 
+  const handleDeleteFile = async (fileId: number) => {
+    if (!confirm('Are you sure you want to delete this file?')) return;
+    await fetch(`/api/files/${fileId}`, { method: 'DELETE' });
+    if (selectedProjectId) fetchProjectDetails(selectedProjectId);
+  };
+
   /* Helper to render upload cards */
   const renderFileSection = (type: 'source' | 'target' | 'codebook', title: string) => {
     // Find all files of this type (we might want to show list if multiple allowed in future logic)
@@ -102,14 +108,23 @@ function App() {
         {files.length > 0 ? (
           <div className="file-list">
             {files.map(file => (
-              <div key={file.id} className="file-info fade-in" style={{ marginBottom: '0.5rem' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem' }}>
-                  <span>✅</span>
-                  <strong>{file.original_filename}</strong>
+              <div key={file.id} className="file-info fade-in" style={{ marginBottom: '0.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ textAlign: 'left' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span>✅</span>
+                    <strong>{file.original_filename}</strong>
+                  </div>
+                  <div style={{ fontSize: '0.85rem', marginTop: '0.1rem', opacity: 0.7, color: 'var(--text)' }}>
+                    {file.columns?.length || 0} columns detected
+                  </div>
                 </div>
-                <div style={{ fontSize: '0.85rem', marginTop: '0.1rem', opacity: 0.7, color: 'var(--text)' }}>
-                  {file.columns?.length || 0} columns detected
-                </div>
+                <button
+                  onClick={() => handleDeleteFile(file.id)}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '1.2rem' }}
+                  title="Delete file"
+                >
+                  🗑️
+                </button>
               </div>
             ))}
             {/* Allow adding more files even if some exist */}
