@@ -178,13 +178,16 @@ export default function MappingView({ projectId, files, onBack, onNext, scopeFil
 
             if (data.logs) setDiscoveryLogs(data.logs);
 
-            // Reload relations
-            await loadRelations();
-
-            alert(`Discovery complete!\n\nFound ${data.mappings?.length || 0} column mappings.`);
-        } catch (e) {
+            if (data.error) {
+                alert(`Discovery Error: ${data.error}`);
+            } else {
+                // Reload relations
+                await loadRelations();
+                alert(`Discovery complete!\n\nFound ${data.mappings?.length || 0} column mappings.`);
+            }
+        } catch (e: any) {
             console.error(e);
-            alert('Discovery failed');
+            alert(`Discovery failed: ${e.message || 'Unknown error'}`);
         }
         setLoading(false);
     };

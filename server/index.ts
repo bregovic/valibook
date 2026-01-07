@@ -517,7 +517,9 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
 
     } catch (error) {
         console.error('Auto-map error:', error);
-        res.status(500).json({ error: (error as Error).message });
+        // Ensure we always return JSON, not HTML
+        res.setHeader('Content-Type', 'application/json');
+        res.status(500).json({ error: String((error as Error).message || error), logs: debugLogs });
     }
 });
 
