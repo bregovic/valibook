@@ -72,6 +72,30 @@ app.post('/api/projects', async (req, res) => {
     }
 });
 
+// 2b. Delete project (cascade delete all related data)
+app.delete('/api/projects/:id', async (req, res) => {
+    const projectId = req.params.id;
+
+    try {
+        // Delete in order of dependencies
+        await db.run('DELETE FROM validation_results WHERE project_id = ?', [projectId]);
+        await db.run('DELETE FROM column_mappings WHERE project_id = ?', [projectId]);
+
+        // Get files to delete their columns
+        const files = await db.query('SELECT id FROM imported_files WHERE project_id = ?', [projectId]);
+        for (const file of files) {
+            await db.run('DELETE FROM file_columns WHERE file_id = ?', [file.id]);
+        }
+
+        await db.run('DELETE FROM imported_files WHERE project_id = ?', [projectId]);
+        await db.run('DELETE FROM validation_projects WHERE id = ?', [projectId]);
+
+        res.json({ success: true, message: 'Project deleted' });
+    } catch (error) {
+        res.status(500).json({ error: (error as Error).message });
+    }
+});
+
 // 3. Upload File & Analyze Columns
 app.post('/api/projects/:id/files', upload.single('file'), async (req, res) => {
     const projectId = req.params.id;

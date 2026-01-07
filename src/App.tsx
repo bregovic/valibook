@@ -64,6 +64,17 @@ function App() {
     setProjectFiles(data.files);
   };
 
+  const deleteProject = async (id: number, e: React.MouseEvent) => {
+    e.stopPropagation(); // Don't open the project
+    if (!confirm('Are you sure you want to DELETE this project and ALL its data?')) return;
+
+    await fetch(`/api/projects/${id}`, { method: 'DELETE' });
+    setProjects(projects.filter(p => p.id !== id));
+    if (selectedProjectId === id) {
+      setSelectedProjectId(null);
+    }
+  };
+
   // Handle multiple file uploads
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>, type: 'source' | 'target' | 'codebook' | 'exclusion') => {
     if (!selectedProjectId || !e.target.files) return;
@@ -213,7 +224,15 @@ function App() {
                   <span style={{ fontWeight: 600 }}>{p.name}</span>
                   {p.description && <span style={{ fontSize: '0.85rem', opacity: 0.7 }}>{p.description}</span>}
                 </div>
-                <span style={{ fontSize: '0.9rem', color: 'var(--primary)' }}>Open &rarr;</span>
+                <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                  <button
+                    onClick={(e) => deleteProject(p.id, e)}
+                    style={{ background: '#dc3545', color: 'white', border: 'none', padding: '0.25rem 0.5rem', borderRadius: '4px', cursor: 'pointer', fontSize: '0.8rem' }}
+                  >
+                    🗑️ Delete
+                  </button>
+                  <span style={{ fontSize: '0.9rem', color: 'var(--primary)' }}>Open &rarr;</span>
+                </div>
               </div>
             ))}
             {projects.length === 0 && <p style={{ textAlign: 'center', opacity: 0.5, padding: '1rem' }}>No projects yet.</p>}
