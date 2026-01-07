@@ -2,8 +2,8 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import multer from 'multer';
-import { initDatabase } from './database.ts';
-import db from './database.ts';
+import { initDatabase } from './database.js';
+import db from './database.js';
 import * as XLSX from 'xlsx';
 import fs from 'fs';
 
