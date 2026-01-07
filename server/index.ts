@@ -355,13 +355,20 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
         // Actually the loop awaits db calls, so we can make loadFileData async.
         const fileDataCache = new Map<number, { headers: any[], colData: Map<number, Set<string>>, rowsCount: number }>();
 
-        const loadFileData = async (file: any) => {
+        const loadFileData = async (file: any, limit: number = 0) => {
             if (fileDataCache.has(file.id)) return fileDataCache.get(file.id)!;
 
             let rows: any[][] = [];
             try {
-                // Fetch rows from DB
-                const rowsRes = await db.query('SELECT row_data FROM imported_file_rows WHERE file_id = ? ORDER BY row_index ASC', [file.id]);
+                // Fetch rows from DB with optional limit
+                let sql = 'SELECT row_data FROM imported_file_rows WHERE file_id = ? ORDER BY row_index ASC';
+                const params = [file.id];
+                if (limit > 0) {
+                    sql += ' LIMIT ?';
+                    params.push(limit);
+                }
+
+                const rowsRes = await db.query(sql, params);
                 if (rowsRes && rowsRes.length > 0) {
                     rows = rowsRes.map(r => JSON.parse(r.row_data));
                 } else {
@@ -380,8 +387,9 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
             const colData = new Map<number, Set<string>>();
 
             // Sample data (optimize: taking max 200 rows for signature analysis)
-            const limit = Math.min(rows.length, 200);
-            for (let r = 1; r < limit; r++) {
+            // We already limited DB fetch if limit > 0
+            const sampleLimit = Math.min(rows.length, 200);
+            for (let r = 1; r < sampleLimit; r++) {
                 rows[r].forEach((val: any, idx: number) => {
                     if (!colData.has(idx)) colData.set(idx, new Set());
                     const s = String(val).trim();
@@ -389,7 +397,7 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
                 });
             }
 
-            const result = { headers, colData, rowsCount: rows.length };
+            const result = { headers, colData, rowsCount: rows.length }; // Note: rowsCount is sample size if limited
             fileDataCache.set(file.id, result);
             return result;
         };
@@ -402,7 +410,7 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
         // DISCOVERY LOOP
         for (const tFile of targets) {
             log(`Analyzing Target File: ${tFile.original_filename}`);
-            const tData = await loadFileData(tFile);
+            const tData = await loadFileData(tFile, 500);
             if (!tData) continue;
 
             const targetColsDB = await db.query('SELECT * FROM file_columns WHERE file_id = ?', [tFile.id]);
@@ -414,7 +422,7 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
             let bestSourceMappings: any[] = [];
 
             for (const sFile of potentialSources) {
-                const sData = await loadFileData(sFile);
+                const sData = await loadFileData(sFile, 500);
                 if (!sData) continue;
 
                 const sourceColsDB = await db.query('SELECT * FROM file_columns WHERE file_id = ?', [sFile.id]);
@@ -492,8 +500,8 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
                 // 2. Must have HIGH UNIQUENESS in both files (>90%)
                 // 3. Prefer ID-like names
 
-                const tData = await loadFileData(tFile);
-                const sData = await loadFileData(bestSourceFile);
+                const tData = await loadFileData(tFile, 500);
+                const sData = await loadFileData(bestSourceFile, 500);
 
                 let keyCandidate: any = null;
                 let bestKeyScore = 0;
@@ -565,7 +573,7 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
                 for (const otherTarget of targets) {
                     if (otherTarget.id === tFile.id) continue;
 
-                    const otherData = await loadFileData(otherTarget);
+                    const otherData = await loadFileData(otherTarget, 500);
                     if (!otherData) continue;
 
                     const otherCols = await db.query('SELECT * FROM file_columns WHERE file_id = ?', [otherTarget.id]);
