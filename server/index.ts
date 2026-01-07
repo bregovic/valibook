@@ -16,7 +16,9 @@ app.use(express.json());
 db.init();
 
 // Multer setup for file uploads
-const UPLOADS_DIR = process.env.UPLOADS_DIR || 'uploads/';
+const isWindows = process.platform === 'win32';
+const UPLOADS_DIR = process.env.UPLOADS_DIR || (isWindows ? 'uploads/' : '/tmp/uploads/');
+
 if (!fs.existsSync(UPLOADS_DIR)) {
     fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
@@ -26,8 +28,10 @@ const storage = multer.diskStorage({
         cb(null, UPLOADS_DIR);
     },
     filename: (req, file, cb) => {
+        // Sanitize filename to avoid filesystem issues
+        const safeName = file.originalname.replace(/[^a-z0-9.]/gi, '_');
         const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1e9);
-        cb(null, uniqueSuffix + '-' + file.originalname);
+        cb(null, uniqueSuffix + '-' + safeName);
     }
 });
 const upload = multer({ storage: storage });
@@ -75,34 +79,41 @@ app.post('/api/projects/:id/files', upload.single('file'), async (req, res) => {
     try {
         const filePath = req.file.path;
 
-        // Insert file record
+        // 1. Insert into DB
         const fileInfo = await db.run('INSERT INTO imported_files (project_id, original_filename, file_type, stored_filename) VALUES (?, ?, ?, ?)',
             [projectId, req.file.originalname, fileType, filePath]);
         const fileId = fileInfo.id;
 
-        // Parse Columns using XLSX
-        const workbook = XLSX.readFile(filePath);
-        const sheetName = workbook.SheetNames[0];
-        const sheet = workbook.Sheets[sheetName];
+        // 2. Parse Columns (Robust)
+        try {
+            const workbook = XLSX.readFile(filePath);
+            const sheetName = workbook.SheetNames[0];
+            const sheet = workbook.Sheets[sheetName];
 
-        // Convert to JSON (header: 1 means array of arrays)
-        const jsonData: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+            // Convert to JSON (header: 1 means array of arrays)
+            const jsonData: any[][] = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
 
-        if (jsonData.length > 0) {
-            const headers = jsonData[0];
-            const firstRow = jsonData.length > 1 ? jsonData[1] : [];
+            if (jsonData && jsonData.length > 0) {
+                const headers = jsonData[0];
+                const firstRow = jsonData.length > 1 ? jsonData[1] : [];
 
-            for (let idx = 0; idx < headers.length; idx++) {
-                const name = String(headers[idx] || `Column ${idx + 1}`);
-                const sample = String(firstRow[idx] || '');
-                await db.run('INSERT INTO file_columns (file_id, column_name, column_index, sample_value) VALUES (?, ?, ?, ?)',
-                    [fileId, name, idx, sample]);
+                for (let idx = 0; idx < headers.length; idx++) {
+                    const name = String(headers[idx] || `Column ${idx + 1}`).trim();
+                    const sample = String(firstRow[idx] || '').substring(0, 100); // Limit sample length
+
+                    await db.run('INSERT INTO file_columns (file_id, column_name, column_index, sample_value) VALUES (?, ?, ?, ?)',
+                        [fileId, name, idx, sample]);
+                }
             }
+        } catch (parseErr) {
+            console.error('Error parsing Excel columns:', parseErr);
+            // We do NOT re-throw, so the file remains uploaded even if parsing fails partially.
+            // Client will see "0 columns" which is better than 500 error.
         }
 
         res.json({ success: true, fileId });
     } catch (error) {
-        console.error(error);
+        console.error('Upload critical error:', error);
         res.status(500).json({ error: (error as Error).message });
     }
 });
