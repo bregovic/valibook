@@ -35,6 +35,11 @@ const upload = multer({ storage: storage });
 
 // --- API ROUTES ---
 
+// Health Check endpoint
+app.get('/health', (req, res) => {
+    res.status(200).send('OK');
+});
+
 // 1. Get all projects
 app.get('/api/projects', (req, res) => {
     try {
