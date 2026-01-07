@@ -427,7 +427,8 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
         // DISCOVERY LOOP
         for (const tFile of targets) {
             log(`Analyzing Target File: ${tFile.original_filename}`);
-            const tData = await loadFileData(tFile, 100);
+            const tData = await loadFileData(tFile, 50);
+            serverLog(`Loaded target data. Headers: ${tData.headers.length}. Rows: ${tData.rowsCount}`);
             if (!tData) continue;
 
             const targetColsDB = await db.query('SELECT * FROM file_columns WHERE file_id = ?', [tFile.id]);
@@ -439,13 +440,19 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
             let bestSourceMappings: any[] = [];
 
             for (const sFile of potentialSources) {
-                const sData = await loadFileData(sFile, 100);
+                const sData = await loadFileData(sFile, 50);
                 if (!sData) continue;
 
                 const sourceColsDB = await db.query('SELECT * FROM file_columns WHERE file_id = ?', [sFile.id]);
 
                 let fileMatchScore = 0;
                 let fileMappings = [];
+
+                // SAFETY LIMIT to prevent OOM
+                if (targetColsDB.length > 30) {
+                    serverLog(`Truncating columns from ${targetColsDB.length} to 30 for safety.`);
+                    targetColsDB.length = 30;
+                }
 
                 // Compare Columns
                 for (let tColIdx = 0; tColIdx < targetColsDB.length; tColIdx++) {
@@ -521,8 +528,8 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
                 // 2. Must have HIGH UNIQUENESS in both files (>90%)
                 // 3. Prefer ID-like names
 
-                const tData = await loadFileData(tFile, 100);
-                const sData = await loadFileData(bestSourceFile, 100);
+                const tData = await loadFileData(tFile, 50);
+                const sData = await loadFileData(bestSourceFile, 50);
 
                 let keyCandidate: any = null;
                 let bestKeyScore = 0;
@@ -594,7 +601,7 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
                 for (const otherTarget of targets) {
                     if (otherTarget.id === tFile.id) continue;
 
-                    const otherData = await loadFileData(otherTarget, 100);
+                    const otherData = await loadFileData(otherTarget, 50);
                     if (!otherData) continue;
 
                     const otherCols = await db.query('SELECT * FROM file_columns WHERE file_id = ?', [otherTarget.id]);
