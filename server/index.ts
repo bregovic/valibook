@@ -143,18 +143,14 @@ app.delete('/api/files/:id', async (req, res) => {
         const file = await db.get('SELECT * FROM imported_files WHERE id = ?', [fileId]);
 
         if (file) {
-            // Manual Cleanup of Dependencies (to avoid FK errors if Cascade not set)
-            // 1. Delete mappings referencing columns of this file
+            // Manual Cleanup of Dependencies
             await db.run(`
                 DELETE FROM column_mappings 
                 WHERE source_column_id IN (SELECT id FROM file_columns WHERE file_id = ?) 
                    OR target_column_id IN (SELECT id FROM file_columns WHERE file_id = ?)
             `, [fileId, fileId]);
 
-            // 2. Delete columns
             await db.run('DELETE FROM file_columns WHERE file_id = ?', [fileId]);
-
-            // 3. Delete file record
             await db.run('DELETE FROM imported_files WHERE id = ?', [fileId]);
 
             // Try delete physical file
@@ -168,6 +164,48 @@ app.delete('/api/files/:id', async (req, res) => {
         }
         res.json({ success: true });
     } catch (error) {
+        res.status(500).json({ error: (error as Error).message });
+    }
+});
+
+// 3.2 Bulk Delete Files
+app.delete('/api/projects/:id/files', async (req, res) => {
+    const projectId = req.params.id;
+    const fileType = req.query.type; // 'source', 'target', 'codebook' or undefined (all)
+
+    try {
+        let query = "SELECT * FROM imported_files WHERE project_id = ?";
+        const params = [projectId];
+
+        if (fileType) {
+            query += " AND file_type = ?";
+            params.push(String(fileType));
+        }
+
+        const filesToDelete = await db.query(query, params);
+
+        for (const file of filesToDelete) {
+            const fileId = file.id;
+
+            // Cleanup DB References
+            await db.run(`
+                DELETE FROM column_mappings 
+                WHERE source_column_id IN (SELECT id FROM file_columns WHERE file_id = ?) 
+                   OR target_column_id IN (SELECT id FROM file_columns WHERE file_id = ?)
+            `, [fileId, fileId]);
+
+            await db.run('DELETE FROM file_columns WHERE file_id = ?', [fileId]);
+            await db.run('DELETE FROM imported_files WHERE id = ?', [fileId]);
+
+            // Cleanup Disk
+            if (file.stored_filename && fs.existsSync(file.stored_filename)) {
+                try { fs.unlinkSync(file.stored_filename); } catch (e) { }
+            }
+        }
+
+        res.json({ success: true, count: filesToDelete.length });
+    } catch (error) {
+        console.error("Bulk delete error:", error);
         res.status(500).json({ error: (error as Error).message });
     }
 });

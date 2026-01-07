@@ -111,15 +111,41 @@ function App() {
     if (selectedProjectId) fetchProjectDetails(selectedProjectId);
   };
 
+  const handleBulkDelete = async (type?: 'source' | 'target' | 'codebook') => {
+    const msg = type
+      ? `Are you sure you want to delete ALL ${type.toUpperCase()} files?\nThis will remove related mappings.`
+      : 'Are you sure you want to delete ALL files in this project?';
+
+    if (!confirm(msg)) return;
+
+    const query = type ? `?type=${type}` : '';
+    try {
+      await fetch(`/api/projects/${selectedProjectId}/files${query}`, { method: 'DELETE' });
+      fetchProjectDetails(selectedProjectId!);
+    } catch (e) {
+      alert('Failed to delete files');
+    }
+  };
+
   /* Helper to render upload cards */
   const renderFileSection = (type: 'source' | 'target' | 'codebook', title: string) => {
-    // Find all files of this type (we might want to show list if multiple allowed in future logic)
-    // For now, let's show the list of uploaded files for this section
     const files = projectFiles.filter(f => f.file_type === type);
 
     return (
       <div className="upload-card">
-        <h3>{title}</h3>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--surface-border)', paddingBottom: '0.5rem' }}>
+          <h3 style={{ margin: 0, border: 0, padding: 0 }}>{title}</h3>
+          {files.length > 0 && (
+            <button
+              onClick={() => handleBulkDelete(type)}
+              style={{ fontSize: '0.8rem', padding: '0.2rem 0.5rem', background: 'none', border: '1px solid var(--danger)', color: 'var(--danger)', borderRadius: '4px', cursor: 'pointer' }}
+              title="Delete all files in this section"
+            >
+              Clear All
+            </button>
+          )}
+        </div>
+
         {files.length > 0 ? (
           <div className="file-list">
             {files.map(file => (
