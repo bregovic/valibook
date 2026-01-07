@@ -14,7 +14,7 @@ echo 2. Vytvarim commit (git commit)...
 git commit -m "%commit_msg%"
 
 echo 3. Odesilam na GitHub (git push)...
-git push -u origin master
+git push -u origin main
 
 echo.
 echo Hotovo!
