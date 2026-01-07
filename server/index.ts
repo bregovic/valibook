@@ -2,7 +2,7 @@ import express from 'express';
 import cors from 'cors';
 import path from 'path';
 import multer from 'multer';
-import db from './db.js';
+import db from './db';
 import * as XLSX_PKG from 'xlsx';
 const { readFile, utils } = (XLSX_PKG as any).default ?? XLSX_PKG;
 import fs from 'fs';
