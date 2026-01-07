@@ -353,83 +353,76 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
     }
 });
 
-// 8. Validate Project
+// 8. Validate Project (Multi-file Support)
 app.post('/api/projects/:id/validate', async (req, res) => {
     const projectId = req.params.id;
 
     try {
-        // Fetch files
-        const sourceFile = await db.get("SELECT * FROM imported_files WHERE project_id = ? AND file_type = 'source' LIMIT 1", [projectId]);
-        const targetFile = await db.get("SELECT * FROM imported_files WHERE project_id = ? AND file_type = 'target' LIMIT 1", [projectId]);
+        // Fetch all project files
+        const allFiles = await db.query("SELECT * FROM imported_files WHERE project_id = ?", [projectId]);
+        const getFile = (id: number) => allFiles.find((f: any) => f.id === id);
 
-        if (!sourceFile || !targetFile) {
-            return res.status(400).json({ error: 'Missing source or target file' });
-        }
-
-        // Fetch Mappings
+        // Fetch all mappings
         const mappings = await db.query('SELECT * FROM column_mappings WHERE project_id = ?', [projectId]);
 
-        // Identify Key Column
-        let keyMapping = mappings.find(m => {
-            try { return JSON.parse(m.mapping_note || '{}').isKey; } catch (e) { return false; }
-        });
-
-        if (!keyMapping) {
-            return res.status(400).json({ error: 'No Primary Key defined in mappings. Please select a Key column.' });
+        if (mappings.length === 0) {
+            return res.status(400).json({ error: 'No mappings defined. Please map columns first.' });
         }
 
-        // Load Mapping Configs
-        const config = mappings.map(m => {
-            const note = JSON.parse(m.mapping_note || '{}');
-            return {
-                sourceId: m.source_column_id,
-                targetId: m.target_column_id,
-                isKey: note.isKey || false,
-                codebookId: note.codebookFileId || null
-            };
-        });
+        // Fetch all column definitions
+        const allColumns = await db.query(
+            `SELECT fc.*, f.file_type 
+             FROM file_columns fc 
+             JOIN imported_files f ON fc.file_id = f.id 
+             WHERE f.project_id = ?`,
+            [projectId]
+        );
 
-        const sourceColInfo = await db.query('SELECT * FROM file_columns WHERE file_id = ?', [sourceFile.id]);
-        const targetColInfo = await db.query('SELECT * FROM file_columns WHERE file_id = ?', [targetFile.id]);
+        const getCol = (id: number) => allColumns.find((c: any) => c.id === id);
 
-        // Helper to get column index by ID
-        const getIdx = (colId: number, info: any[]) => info.find(c => c.id === colId)?.column_index;
+        // Group mappings by Source File to identify pairs
+        const filePairs = new Map<number, { targetFileId: number, mappings: any[] }>();
 
-        const sourceKeyIdx = getIdx(keyMapping.source_column_id, sourceColInfo);
-        const targetKeyIdx = getIdx(keyMapping.target_column_id, targetColInfo);
+        for (const m of mappings) {
+            const sCol = getCol(m.source_column_id);
+            if (!sCol) continue;
 
-        if (sourceKeyIdx === undefined || targetKeyIdx === undefined) {
-            return res.status(400).json({ error: 'Key columns not found in file definitions' });
+            const sourceFileId = sCol.file_id;
+
+            // Identify target file from target column (if mapped)
+            let targetFileId = null;
+            if (m.target_column_id) {
+                const tCol = getCol(m.target_column_id);
+                if (tCol) targetFileId = tCol.file_id;
+            }
+
+            if (targetFileId) {
+                if (!filePairs.has(sourceFileId)) {
+                    filePairs.set(sourceFileId, { targetFileId, mappings: [] });
+                }
+                const group = filePairs.get(sourceFileId);
+                // Ensure consistency (1 Source -> 1 Target assumption per file for simplicity)
+                if (group && group.targetFileId === targetFileId) {
+                    group.mappings.push(m);
+                }
+            }
         }
 
-        // Load Data
+        const results: any[] = [];
+
+        // Helper to get cached codebook values
+        const codebookCache = new Map<number, Set<string>>();
         const readSheet = (path: string) => {
+            if (!fs.existsSync(path)) return [];
             const wb = readFile(path);
             return utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, defval: '' }) as any[][];
         };
 
-        const sourceRows = readSheet(sourceFile.stored_filename);
-        const targetRows = readSheet(targetFile.stored_filename);
-
-        // Remove Headers
-        const sourceHeader = sourceRows.shift();
-        const targetHeader = targetRows.shift();
-
-        // Index Data by Key
-        const sourceMap = new Map<string, any[]>();
-        sourceRows.forEach((row, i) => sourceMap.set(String(row[sourceKeyIdx]), row));
-
-        const targetMap = new Map<string, any[]>();
-        targetRows.forEach((row, i) => targetMap.set(String(row[targetKeyIdx]), row));
-
-        // Codebook Caches
-        const codebookCache = new Map<number, Set<string>>();
         const getCodebookValues = async (cbId: number) => {
             if (!codebookCache.has(cbId)) {
-                const cbFile = await db.get("SELECT * FROM imported_files WHERE id = ?", [cbId]);
+                const cbFile = getFile(cbId);
                 if (cbFile) {
                     const rows = readSheet(cbFile.stored_filename) as any[][];
-                    // Assume codebook values are in first column
                     const values = new Set(rows.slice(1).map(r => String(r[0])));
                     codebookCache.set(cbId, values);
                 } else {
@@ -439,70 +432,105 @@ app.post('/api/projects/:id/validate', async (req, res) => {
             return codebookCache.get(cbId)!;
         };
 
-        const results: { key: string; type: string; message?: string; column?: string; expected?: string; actual?: string }[] = [];
+        // Iterate over each file pair and validate
+        for (const [sFileId, group] of filePairs) {
+            const sFile = getFile(sFileId);
+            const tFile = getFile(group.targetFileId);
 
-        // 1. Check Missing in Target
-        for (const [key, sRow] of sourceMap) {
-            if (!targetMap.has(key)) {
-                results.push({
-                    key,
-                    type: 'missing_row',
-                    message: `Row with Key ${key} missing in Target file`
-                });
-            } else {
-                // Compare Rows
-                const tRow = targetMap.get(key)!;
+            if (!sFile || !tFile) continue;
 
-                for (const cfg of config) {
-                    if (cfg.targetId) {
-                        const sIdx = getIdx(cfg.sourceId, sourceColInfo);
-                        const tIdx = getIdx(cfg.targetId, targetColInfo);
+            const fileLabel = `${sFile.original_filename} -> ${tFile.original_filename}`;
 
-                        if (sIdx !== undefined && tIdx !== undefined) {
-                            // Helper to normalize values for comparison (handles comma decimals)
-                            const normalizeVal = (val: any) => {
-                                if (val === undefined || val === null) return '';
-                                let str = String(val).trim();
-                                if (str === '') return '';
-                                // Check if it looks like a number with comma
-                                if (/^-?\d+,\d+$/.test(str)) {
-                                    str = str.replace(',', '.');
-                                }
-                                // Try to normalize floating point representation
-                                const num = Number(str);
-                                return isNaN(num) ? str : num;
-                            };
+            // Find Key Mapping
+            const keyMapping = group.mappings.find((m: any) => {
+                try { return JSON.parse(m.mapping_note || '{}').isKey; } catch (e) { return false; }
+            });
 
-                            const sValNorm = normalizeVal(sRow[sIdx]);
-                            const tValNorm = normalizeVal(tRow[tIdx]);
+            if (!keyMapping) {
+                results.push({ key: 'setup', type: 'error', message: `No Primary Key defined for ${fileLabel}`, file: fileLabel });
+                continue;
+            }
 
-                            // Define raw string values for reporting and codebook check
-                            const sVal = String(sRow[sIdx]).trim();
-                            const tVal = String(tRow[tIdx]).trim();
+            const sourceKeyIdx = getCol(keyMapping.source_column_id)?.column_index;
+            const targetKeyIdx = getCol(keyMapping.target_column_id)?.column_index;
 
-                            // Strict check on normalized values (unless both are empty strings effectively)
-                            if (sValNorm !== tValNorm) {
+            // Load Data
+            const sourceRows = readSheet(sFile.stored_filename);
+            const targetRows = readSheet(tFile.stored_filename);
+
+            // Remove headers
+            sourceRows.shift();
+            targetRows.shift();
+
+            // Index Maps
+            const sourceMap = new Map<string, any[]>();
+            sourceRows.forEach(r => {
+                const k = String(r[sourceKeyIdx]).trim();
+                if (k) sourceMap.set(k, r);
+            });
+
+            const targetMap = new Map<string, any[]>();
+            targetRows.forEach(r => {
+                const k = String(r[targetKeyIdx]).trim();
+                if (k) targetMap.set(k, r);
+            });
+
+            // 1. Check Missing Records
+            for (const [key, sRow] of sourceMap) {
+                if (!targetMap.has(key)) {
+                    results.push({
+                        key,
+                        type: 'missing_row',
+                        message: `Row missing in Target`,
+                        file: fileLabel,
+                        expected: 'Present',
+                        actual: 'Missing'
+                    });
+                } else {
+                    // 2. Check Value Mismatches
+                    const tRow = targetMap.get(key)!;
+
+                    for (const m of group.mappings) {
+                        if (m.source_column_id === keyMapping.source_column_id) continue;
+                        if (!m.target_column_id) continue;
+
+                        const sColDef = getCol(m.source_column_id);
+                        const tColDef = getCol(m.target_column_id);
+
+                        if (!sColDef || !tColDef) continue;
+
+                        let cbId = null;
+                        try { cbId = JSON.parse(m.mapping_note || '{}').codebookFileId; } catch (e) { }
+
+                        const sIdx = sColDef.column_index;
+                        const tIdx = tColDef.column_index;
+
+                        const sVal = String(sRow[sIdx] || '').trim();
+                        const tVal = String(tRow[tIdx] || '').trim();
+
+                        if (sVal !== tVal) {
+                            results.push({
+                                key,
+                                type: 'value_mismatch',
+                                column: `${sColDef.column_name}`,
+                                expected: sVal,
+                                actual: tVal,
+                                file: fileLabel
+                            });
+                        }
+
+                        if (cbId) {
+                            const validValues = await getCodebookValues(cbId);
+                            if (!validValues.has(tVal) && tVal !== '') {
                                 results.push({
                                     key,
-                                    type: 'value_mismatch',
-                                    column: sourceColInfo.find(c => c.id === cfg.sourceId)?.column_name,
-                                    expected: String(sRow[sIdx]),
-                                    actual: String(tRow[tIdx])
+                                    type: 'codebook_violation',
+                                    column: tColDef.column_name,
+                                    message: `Value not in codebook`,
+                                    expected: 'Valid Code',
+                                    actual: tVal,
+                                    file: fileLabel
                                 });
-                            }
-
-                            // Check Codebook via async helper - inefficient loop, but valid for now
-                            if (cfg.codebookId) {
-                                const allowed = await getCodebookValues(cfg.codebookId);
-                                if (!allowed.has(tVal) && tVal !== '') {
-                                    results.push({
-                                        key,
-                                        type: 'codebook_violation',
-                                        column: sourceColInfo.find(c => c.id === cfg.sourceId)?.column_name,
-                                        message: `Value '${tVal}' not found in codebook`,
-                                        actual: tVal
-                                    });
-                                }
                             }
                         }
                     }
@@ -510,30 +538,19 @@ app.post('/api/projects/:id/validate', async (req, res) => {
             }
         }
 
-        // 2. Check Extra in Target
-        for (const [key] of targetMap) {
-            if (!sourceMap.has(key)) {
-                results.push({
-                    key,
-                    type: 'extra_row',
-                    message: `Row with Key ${key} extra in Target file`
-                });
-            }
-        }
-
-        // Clean old results
+        // Clean & Save Results
         await db.run('DELETE FROM validation_results WHERE project_id = ?', [projectId]);
 
-        // Save new results (limit batch size in real app, here simple loop)
+        // Batch insert (simplified loop)
+        const stmt = 'INSERT INTO validation_results (project_id, column_mapping_id, error_message, actual_value, expected_value) VALUES (?, ?, ?, ?, ?)';
         for (const r of results) {
-            await db.run('INSERT INTO validation_results (project_id, column_mapping_id, error_message, actual_value, expected_value) VALUES (?, ?, ?, ?, ?)',
-                [projectId, null, `${r.type}: ${r.message || ''} (Key: ${r.key})`, r.actual || '', r.expected || '']);
+            await db.run(stmt, [projectId, null, `${r.file ? '[' + r.file + '] ' : ''}${r.type}: ${r.message || ''}`, r.actual || '', r.expected || '']);
         }
 
         res.json({ success: true, issuesCount: results.length, limit: 100, issues: results.slice(0, 100) });
 
     } catch (error) {
-        console.error(error);
+        console.error('Validation Error:', error);
         res.status(500).json({ error: (error as Error).message });
     }
 });

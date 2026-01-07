@@ -7,6 +7,7 @@ interface Issue {
     column?: string;
     expected?: string;
     actual?: string;
+    file?: string;
 }
 
 interface Props {
@@ -85,6 +86,7 @@ export default function ValidationResultView({ projectId, onBack }: Props) {
                                 <thead>
                                     <tr>
                                         <th>Type</th>
+                                        <th>File Pair</th>
                                         <th>Key</th>
                                         <th>Column</th>
                                         <th>Expected (Vzor)</th>
@@ -100,6 +102,7 @@ export default function ValidationResultView({ projectId, onBack }: Props) {
                                                     {issue.type.replace('_', ' ')}
                                                 </span>
                                             </td>
+                                            <td style={{ fontSize: '0.85em', color: 'var(--text-muted)' }}>{issue.file || '-'}</td>
                                             <td><strong>{issue.key}</strong></td>
                                             <td>{issue.column || '-'}</td>
                                             <td style={{ color: 'var(--success)' }}>{issue.expected}</td>
