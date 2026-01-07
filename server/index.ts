@@ -203,29 +203,39 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
 
         // Helper to read column data
         const getColumnData = (filePath: string) => {
-            const wb = XLSX.readFile(filePath);
-            const sheet = wb.Sheets[wb.SheetNames[0]];
-            // Get data array of arrays
-            const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }) as any[][];
-            if (rows.length < 2) return { headers: [], dataCols: {} }; // Only header or empty
-
-            // Transpose logic: we need columns
-            const headers = rows[0] as string[];
-            const dataCols: { [key: number]: Set<string> } = {};
-
-            // Initialize sets
-            headers.forEach((_, idx) => dataCols[idx] = new Set());
-
-            // Limit rows scan for performance (e.g. first 1000 rows)
-            const limit = Math.min(rows.length, 1000);
-            for (let r = 1; r < limit; r++) {
-                const row = rows[r];
-                row.forEach((val: any, cIdx: number) => {
-                    const s = String(val).trim();
-                    if (s) dataCols[cIdx].add(s);
-                });
+            if (!fs.existsSync(filePath)) {
+                console.warn(`File missing on disk: ${filePath}`);
+                return { headers: [], dataCols: {} };
             }
-            return { headers, dataCols };
+
+            try {
+                const wb = XLSX.readFile(filePath);
+                const sheet = wb.Sheets[wb.SheetNames[0]];
+                // Get data array of arrays
+                const rows = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' }) as any[][];
+                if (rows.length < 2) return { headers: [], dataCols: {} }; // Only header or empty
+
+                // Transpose logic: we need columns
+                const headers = rows[0] as string[];
+                const dataCols: { [key: number]: Set<string> } = {};
+
+                // Initialize sets
+                headers.forEach((_, idx) => dataCols[idx] = new Set());
+
+                // Limit rows scan for performance (e.g. first 1000 rows)
+                const limit = Math.min(rows.length, 1000);
+                for (let r = 1; r < limit; r++) {
+                    const row = rows[r];
+                    row.forEach((val: any, cIdx: number) => {
+                        const s = String(val).trim();
+                        if (s) dataCols[cIdx].add(s);
+                    });
+                }
+                return { headers, dataCols };
+            } catch (e) {
+                console.error('Error reading file for auto-map:', e);
+                return { headers: [], dataCols: {} };
+            }
         };
 
         const sourceData = getColumnData(sourceFile.stored_filename);
