@@ -16,6 +16,11 @@ app.use(express.json());
 // Initialize Database
 db.init();
 
+// Debug health check
+app.get('/api/health', (req, res) => {
+    res.json({ status: 'ok', time: new Date().toISOString() });
+});
+
 // Multer setup for file uploads
 const isWindows = process.platform === 'win32';
 const UPLOADS_DIR = process.env.UPLOADS_DIR || (isWindows ? 'uploads/' : '/tmp/uploads/');
