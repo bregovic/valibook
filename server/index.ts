@@ -505,6 +505,9 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
             await db.run('DELETE FROM column_mappings WHERE project_id = ?', [projectId]);
 
             for (const m of newMappings) {
+                // Skip reference-only mappings (no source column) - they are stored in note
+                if (!m.sourceColumnId) continue;
+
                 await db.run('INSERT INTO column_mappings (project_id, source_column_id, target_column_id, mapping_note) VALUES (?, ?, ?, ?)',
                     [projectId, m.sourceColumnId, m.targetColumnId, m.note]);
             }
