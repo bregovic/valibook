@@ -6,15 +6,21 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const DB_PATH = path.join(__dirname, '../validator.db');
-const SCHEMA_PATH = path.join(__dirname, '../schema.sql');
+// Allow overriding DB path via environment variable (useful for Railway Volumes)
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, '..');
+const DB_PATH = path.join(DATA_DIR, 'validator.db');
+// Ensure directory exists if using custom path
+if (!fs.existsSync(DATA_DIR)) {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+const schema = fs.readFileSync(path.join(__dirname, '../schema.sql'), 'utf-8'); // Schema stays in code
 
 const db = new Database(DB_PATH);
 
 export function initDatabase() {
     console.log('Initializing database...');
     try {
-        const schema = fs.readFileSync(SCHEMA_PATH, 'utf-8');
         db.exec(schema);
         console.log('Database initialized successfully.');
     } catch (error) {
