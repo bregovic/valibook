@@ -256,14 +256,13 @@ function App() {
                 {(projectFiles.some(f => f.file_type === 'codebook') || showCodebooks) ? (
                   renderFileSection('codebook', '3. Codebooks (Lookup Tables)')
                 ) : (
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', border: '1px dashed var(--border)', borderRadius: '8px' }}>
-                    <button
-                      className="secondary"
+                  <div style={{ textAlign: 'center', marginTop: '0.5rem', gridColumn: '1 / -1' }}>
+                    <span
                       onClick={() => setShowCodebooks(true)}
-                      style={{ border: 'none', background: 'none', color: 'var(--primary)', cursor: 'pointer', textDecoration: 'underline' }}
+                      style={{ cursor: 'pointer', fontSize: '0.8rem', opacity: 0.5, textDecoration: 'underline' }}
                     >
-                      ➕ Add Codebooks (Optional)
-                    </button>
+                      + Show Codebook Upload
+                    </span>
                   </div>
                 )}
               </div>
