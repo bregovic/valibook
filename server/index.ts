@@ -31,6 +31,20 @@ if (!fs.existsSync(UPLOADS_DIR)) {
     fs.mkdirSync(UPLOADS_DIR, { recursive: true });
 }
 
+// GLOBAL DEBUG LOG BUFFER for diagnosing 500 errors
+const serverLogs: string[] = [];
+function serverLog(msg: string) {
+    const time = new Date().toISOString().split('T')[1].substring(0, 8);
+    const line = `[${time}] ${msg}`;
+    console.log(line);
+    serverLogs.push(line);
+    if (serverLogs.length > 200) serverLogs.shift(); // Keep last 200 lines
+}
+
+app.get('/api/debug/logs', (req, res) => {
+    res.json({ logs: serverLogs });
+});
+
 const storage = multer.diskStorage({
     destination: (req, file, cb) => {
         cb(null, UPLOADS_DIR);
@@ -324,7 +338,10 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
     const { sourceFileId, targetFileId } = req.body; // Optional: restrict to pair if user wants
 
     const debugLogs: string[] = [];
-    const log = (msg: string) => { console.log(`[auto-map] ${msg}`); debugLogs.push(msg); };
+    const log = (msg: string) => {
+        debugLogs.push(msg);
+        serverLog(`[AutoMap ${projectId}] ${msg}`);
+    };
 
     try {
         log(`Starting auto-map for project ${projectId}`);
@@ -636,6 +653,7 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
         res.json({ mappings: newMappings, logs: debugLogs });
 
     } catch (error) {
+        serverLog(`Auto-map error: ${error}`);
         console.error('Auto-map error:', error);
         // Ensure we always return JSON, not HTML
         res.setHeader('Content-Type', 'application/json');
@@ -649,8 +667,10 @@ app.post('/api/projects/:id/validate', async (req, res) => {
     const { scopeFileId } = req.body;
 
     try {
+        serverLog(`Starting Auto-Map for Project ${projectId}`);
         // Fetch all project files
         const allFiles = await db.query("SELECT * FROM imported_files WHERE project_id = ?", [projectId]);
+        serverLog(`Found ${allFiles.length} files for project ${projectId}`);
         const getFile = (id: number) => allFiles.find((f: any) => f.id === id);
 
         // Fetch all mappings
