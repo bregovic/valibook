@@ -5,15 +5,50 @@
 }
 
 /* Typography Overrides */
+.app-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 2rem;
+  border-bottom: 1px solid var(--surface-border);
+  padding-bottom: 1rem;
+}
+
+.logo-section {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.app-logo {
+  height: 48px;
+  /* Adjust based on your logo aspect ratio */
+  width: auto;
+}
+
 h1 {
-  font-size: 1.75rem;
+  font-size: 1.5rem;
   color: var(--text-main);
   background: none;
   -webkit-text-fill-color: initial;
   text-align: left;
-  border-bottom: 1px solid var(--surface-border);
-  padding-bottom: 1rem;
-  margin-bottom: 2rem;
+  border-bottom: none;
+  padding-bottom: 0;
+  margin-bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.beta-tag {
+  font-size: 0.7rem;
+  background: var(--primary-light);
+  color: var(--primary);
+  padding: 0.2rem 0.5rem;
+  border-radius: 99px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
 }
 
 h2 {

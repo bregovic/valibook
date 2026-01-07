@@ -109,7 +109,15 @@ function App() {
 
   return (
     <div className="app-container fade-in">
-      <h1>Export Validator</h1>
+      <header className="app-header">
+        <div className="logo-section">
+          <img src="/logo.png" alt="ValiBook Logo" className="app-logo" />
+          <h1>ValiBook <span className="beta-tag">BETA</span></h1>
+        </div>
+        <div className="user-section">
+          {/* Placeholder for future user profile */}
+        </div>
+      </header>
 
       {!selectedProjectId ? (
         <div className="project-select-card">
