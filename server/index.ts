@@ -436,6 +436,10 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
         }
 
         // SAVE to DB
+        // SAVE to DB
+        // DEBUG: Commenting out DB writes to isolate crash
+        serverLog(`Found ${newMappings.length} mappings. Skipping DB write for debug.`);
+        /*
         if (newMappings.length > 0) {
             await db.run('DELETE FROM column_mappings WHERE project_id = ?', [projectId]);
             for (const m of newMappings) {
@@ -443,6 +447,7 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
                     [projectId, m.sourceColumnId, m.targetColumnId, m.note]);
             }
         }
+        */
 
         res.json({ mappings: newMappings, logs: debugLogs });
 
