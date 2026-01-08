@@ -8,7 +8,7 @@ const { readFile, utils } = (XLSX_PKG as any).default ?? XLSX_PKG;
 import fs from 'fs';
 
 const app = express();
-const PORT = process.env.PORT || 8080;
+const PORT = process.env.PORT || 3001;
 
 app.use(cors());
 app.use(cors());
@@ -429,6 +429,10 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
                 log(` => Matched with ${bestSource.original_filename} (Score: ${bestScore.toFixed(1)})`);
 
                 // Add mappings
+                // Guess Primary Key (simply first ID-like column or first mapped column)
+                let keyCandidate = bestMappings.find(m => /id|key|kod|code/i.test(m.sourceColName));
+                if (!keyCandidate) keyCandidate = bestMappings[0];
+
                 if (keyCandidate) {
                     log(`   Selected Primary Key: ${keyCandidate.sourceColName}`);
                 } else {
