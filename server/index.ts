@@ -425,8 +425,11 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
         for (const tFile of targets) {
             log(`Analyzing Target File: ${tFile.original_filename}`);
             const tData = await loadFileData(tFile, 50);
+            if (!tData) {
+                serverLog(`Skipping file ${tFile.original_filename} - No data loaded.`);
+                continue;
+            }
             serverLog(`Loaded target data. Headers: ${tData.headers.length}. Rows: ${tData.rowsCount}`);
-            if (!tData) continue;
 
             const targetColsDB = await db.query('SELECT * FROM file_columns WHERE file_id = ?', [tFile.id]);
 
