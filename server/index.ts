@@ -146,20 +146,11 @@ app.post('/api/projects/:id/files', upload.single('file'), async (req, res) => {
             const sheet = wb.Sheets[wb.SheetNames[0]];
             jsonData = utils.sheet_to_json(sheet, { header: 1, defval: '' });
 
-            // BATCH INSERT ROWS
-            const BATCH_SIZE = 500;
-            for (let i = 0; i < jsonData.length; i += BATCH_SIZE) {
-                const chunk = jsonData.slice(i, i + BATCH_SIZE);
-                if (chunk.length === 0) break;
-
-                const placeholders = chunk.map(() => '(?, ?, ?)').join(',');
-                const values = [];
-                for (let c = 0; c < chunk.length; c++) {
-                    values.push(fileId, i + c, JSON.stringify(chunk[c]));
-                }
-
-                // Use query for batch insert (db.run expects RETURNING id for single row usually)
-                await db.query(`INSERT INTO imported_file_rows (file_id, row_index, row_data) VALUES ${placeholders}`, values);
+            // BLOB STORAGE: Update file_data with full JSON content
+            if (jsonData.length > 0) {
+                // Optimization: Store as stringified JSON in DB
+                // Postgres TEXT column can hold up to 1GB, so 50MB is fine.
+                await db.run('UPDATE imported_files SET file_data = ? WHERE id = ?', [JSON.stringify(jsonData), fileId]);
             }
 
         } catch (parseErr) {
@@ -346,10 +337,10 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
     try {
         log(`Starting auto-map for project ${projectId}`);
 
-        // 1. Fetch all files
+        // 1. Fetch all files (Metadata ONLY)
         let allFiles: any[];
         try {
-            allFiles = await db.query("SELECT * FROM imported_files WHERE project_id = ?", [projectId]);
+            allFiles = await db.query("SELECT id, project_id, original_filename, file_type, stored_filename FROM imported_files WHERE project_id = ?", [projectId]);
             log(`Found ${allFiles.length} files`);
         } catch (dbErr: any) {
             log(`DB Error: ${dbErr.message}`);
@@ -377,20 +368,26 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
 
             let rows: any[][] = [];
             try {
-                // Fetch rows from DB with optional limit
-                let sql = 'SELECT row_data FROM imported_file_rows WHERE file_id = ? ORDER BY row_index ASC';
-                const params = [file.id];
-                if (limit > 0) {
-                    sql += ' LIMIT ?';
-                    params.push(limit);
+                // BLOB STORAGE FETCH
+                const res = await db.query('SELECT file_data FROM imported_files WHERE id = ?', [file.id]);
+                if (res && res[0] && res[0].file_data) {
+                    rows = JSON.parse(res[0].file_data);
+                    if (limit > 0) {
+                        rows = rows.slice(0, limit);
+                    }
+                } else {
+                    // Try fallback (legacy rows)
+                    let sql = 'SELECT row_data FROM imported_file_rows WHERE file_id = ? ORDER BY row_index ASC';
+                    const params = [file.id];
+                    if (limit > 0) { sql += ' LIMIT ?'; params.push(limit); }
+                    const rowsRes = await db.query(sql, params);
+                    if (rowsRes && rowsRes.length > 0) {
+                        rows = rowsRes.map(r => JSON.parse(r.row_data));
+                    }
                 }
 
-                const rowsRes = await db.query(sql, params);
-                if (rowsRes && rowsRes.length > 0) {
-                    rows = rowsRes.map(r => JSON.parse(r.row_data));
-                } else {
-                    // Fallback or empty
-                    log(`Warning: No DB rows for file ${file.original_filename}.`);
+                if (!rows || rows.length === 0) {
+                    log(`Warning: No data for file ${file.original_filename}.`);
                     return null;
                 }
             } catch (e) {
@@ -675,7 +672,8 @@ app.post('/api/projects/:id/validate', async (req, res) => {
 
     try {
         serverLog(`Starting Validation for Project ${projectId}`);
-        const allFiles = await db.query("SELECT * FROM imported_files WHERE project_id = ?", [projectId]);
+        // Fetch Metadata Only
+        const allFiles = await db.query("SELECT id, project_id, original_filename, file_type, stored_filename FROM imported_files WHERE project_id = ?", [projectId]);
 
         const getFile = (id: number) => allFiles.find((f: any) => f.id === id);
 
@@ -704,11 +702,20 @@ app.post('/api/projects/:id/validate', async (req, res) => {
             if (sheetCache.has(file.id)) return sheetCache.get(file.id)!;
 
             try {
-                const rowsRes = await db.query('SELECT row_data FROM imported_file_rows WHERE file_id = ? ORDER BY row_index ASC', [file.id]);
-                if (rowsRes && rowsRes.length > 0) {
-                    const data = rowsRes.map(r => JSON.parse(r.row_data));
+                // BLOB FETCH
+                const res = await db.query('SELECT file_data FROM imported_files WHERE id = ?', [file.id]);
+                if (res && res[0] && res[0].file_data) {
+                    const data = JSON.parse(res[0].file_data);
                     sheetCache.set(file.id, data);
                     return data;
+                } else {
+                    // Fallback
+                    const rowsRes = await db.query('SELECT row_data FROM imported_file_rows WHERE file_id = ? ORDER BY row_index ASC', [file.id]);
+                    if (rowsRes && rowsRes.length > 0) {
+                        const data = rowsRes.map(r => JSON.parse(r.row_data));
+                        sheetCache.set(file.id, data);
+                        return data;
+                    }
                 }
             } catch (e) { console.error("Error fetching DB rows", e); }
 
