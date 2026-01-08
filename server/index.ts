@@ -362,13 +362,24 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
             let bestScore = 0;
             let bestMappings: any[] = [];
 
+            if (targetCols.length > 2000) {
+                serverLog(`Warning: Too many columns (${targetCols.length}). Truncating to 2000.`);
+                targetCols.length = 2000;
+            }
+
             for (const sFile of potentialSources) {
                 const sourceCols = await db.query('SELECT * FROM file_columns WHERE file_id = ?', [sFile.id]);
+                if (sourceCols.length > 2000) sourceCols.length = 2000;
 
                 let fileScore = 0;
                 let fileMappings = [];
 
-                for (const tCol of targetCols) {
+                // Compare Columns
+                for (let i = 0; i < targetCols.length; i++) {
+                    // YIELD to event loop to prevent watchdog kill
+                    if (i % 50 === 0) await new Promise(r => setImmediate(r));
+
+                    const tCol = targetCols[i];
                     // Find best match in source cols
                     let bestColMatch = null;
                     let bestColScore = 0;
@@ -418,36 +429,40 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
                 log(` => Matched with ${bestSource.original_filename} (Score: ${bestScore.toFixed(1)})`);
 
                 // Add mappings
-                // Guess Primary Key (simply first ID-like column or first mapped column)
-                let keyCandidate = bestMappings.find(m => /id|key|kod|code/i.test(m.sourceColName));
-                if (!keyCandidate) keyCandidate = bestMappings[0];
+                if (keyCandidate) {
+                    log(`   Selected Primary Key: ${keyCandidate.sourceColName}`);
+                } else {
+                    log(`   WARNING: No suitable Primary Key found for this mapping!`);
+                }
 
-                newMappings.push(...bestMappings.map(m => ({
+                const bindings = bestMappings.map(m => ({
                     sourceColumnId: m.sourceColumnId,
                     targetColumnId: m.targetColumnId,
                     note: JSON.stringify({
-                        isKey: keyCandidate && m.sourceColumnId === keyCandidate.sourceColumnId,
+                        isKey: (keyCandidate && m.sourceColumnId === keyCandidate.sourceColumnId) || false,
                         codebookFileId: m.codebookFileId,
                         autoDiscovered: true,
                         strategy: 'metadata_name_match'
                     })
-                })));
+                }));
+
+                // Safe Array Append
+                for (const b of bindings) newMappings.push(b);
             }
         }
 
         // SAVE to DB
-        // SAVE to DB
-        // DEBUG: Commenting out DB writes to isolate crash
-        serverLog(`Found ${newMappings.length} mappings. Skipping DB write for debug.`);
-        /*
         if (newMappings.length > 0) {
+            serverLog(`Saving ${newMappings.length} mappings to DB...`);
             await db.run('DELETE FROM column_mappings WHERE project_id = ?', [projectId]);
+
+            // Batch insert or sequential
             for (const m of newMappings) {
                 await db.run('INSERT INTO column_mappings (project_id, source_column_id, target_column_id, mapping_note) VALUES (?, ?, ?, ?)',
                     [projectId, m.sourceColumnId, m.targetColumnId, m.note]);
             }
+            serverLog(`Saved successfully.`);
         }
-        */
 
         res.json({ mappings: newMappings, logs: debugLogs });
 
