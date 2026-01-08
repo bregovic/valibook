@@ -320,13 +320,13 @@ app.post('/api/projects/:id/mappings', async (req, res) => {
     }
 });
 
-// 7. Auto-Map & Global Discovery (Smart Discovery)
+// 7. Auto-Map & Global Discovery (Smart Metadata Mode)
 app.post('/api/projects/:id/auto-map', async (req, res) => {
     // Force JSON response
     res.setHeader('Content-Type', 'application/json');
 
     const projectId = req.params.id;
-    const { sourceFileId, targetFileId } = req.body; // Optional: restrict to pair if user wants
+    const { sourceFileId, targetFileId } = req.body;
 
     const debugLogs: string[] = [];
     const log = (msg: string) => {
@@ -335,323 +335,110 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
     };
 
     try {
-        log(`Starting auto-map for project ${projectId}`);
+        log(`Starting Metadata-Based Auto-Map for project ${projectId}`);
 
-        // 1. Fetch all files (Metadata ONLY)
-        let allFiles: any[];
-        try {
-            allFiles = await db.query("SELECT id, project_id, original_filename, file_type, stored_filename FROM imported_files WHERE project_id = ?", [projectId]);
-            log(`Found ${allFiles.length} files`);
-        } catch (dbErr: any) {
-            log(`DB Error: ${dbErr.message}`);
-            return res.status(500).json({ error: `Database error: ${dbErr.message}`, logs: debugLogs });
-        }
+        // Fetch files (metadata)
+        const allFiles = await db.query("SELECT id, project_id, original_filename, file_type FROM imported_files WHERE project_id = ?", [projectId]);
 
-        const targets = allFiles.filter((f: any) => f.file_type === 'target' && (!targetFileId || f.id === targetFileId));
-        const sources = allFiles.filter((f: any) => f.file_type === 'source' && (!sourceFileId || f.id === sourceFileId));
+        const targets = allFiles.filter((f: any) => f.file_type === 'target');
+        const sources = allFiles.filter((f: any) => f.file_type === 'source');
         const codebooks = allFiles.filter((f: any) => f.file_type === 'codebook');
-
-        // Combined potential sources (Source of Truth + Codebooks)
         const potentialSources = [...sources, ...codebooks];
 
-        if (targets.length === 0 || potentialSources.length === 0) {
-            return res.json({ mappings: [], logs: ["Not enough files to perform discovery."] });
-        }
-
-        // Helper: Load Column Data for a file (ASYNC now, but we need to fetch inside)
-        // Since loadFileData was synchronous-ish in loop, we need to adapt.
-        // Actually the loop awaits db calls, so we can make loadFileData async.
-        const fileDataCache = new Map<number, { headers: any[], colData: Map<number, Set<string>>, rowsCount: number }>();
-
-        const loadFileData = async (file: any, limit: number = 0) => {
-            if (fileDataCache.has(file.id)) return fileDataCache.get(file.id)!;
-
-            let rows: any[][] = [];
-            try {
-                // BLOB STORAGE FETCH
-                const res = await db.query('SELECT file_data FROM imported_files WHERE id = ?', [file.id]);
-                if (res && res[0] && res[0].file_data) {
-                    rows = JSON.parse(res[0].file_data);
-                    if (limit > 0) {
-                        rows = rows.slice(0, limit);
-                    }
-                } else {
-                    // Try fallback (legacy rows)
-                    let sql = 'SELECT row_data FROM imported_file_rows WHERE file_id = ? ORDER BY row_index ASC';
-                    const params = [file.id];
-                    if (limit > 0) { sql += ' LIMIT ?'; params.push(limit); }
-                    const rowsRes = await db.query(sql, params);
-                    if (rowsRes && rowsRes.length > 0) {
-                        rows = rowsRes.map(r => JSON.parse(r.row_data));
-                    }
-                }
-
-                if (!rows || rows.length === 0) {
-                    log(`Warning: No data for file ${file.original_filename}.`);
-                    return null;
-                }
-            } catch (e) {
-                log(`Error fetching DB rows for ${file.original_filename}: ${(e as Error).message}`);
-                return null;
-            }
-
-            if (!rows || rows.length < 2) return null;
-
-            const headers = rows[0];
-            const colData = new Map<number, Set<string>>();
-
-            // Sample data (optimize: taking max 200 rows for signature analysis)
-            // We already limited DB fetch if limit > 0
-            const sampleLimit = Math.min(rows.length, 200);
-            for (let r = 1; r < sampleLimit; r++) {
-                rows[r].forEach((val: any, idx: number) => {
-                    if (!colData.has(idx)) colData.set(idx, new Set());
-                    const s = String(val).trim();
-                    if (s) colData.get(idx)!.add(s);
-                });
-            }
-
-            const result = { headers, colData, rowsCount: rows.length }; // Note: rowsCount is sample size if limited
-            fileDataCache.set(file.id, result);
-            return result;
-        };
+        log(`Found ${targets.length} targets and ${potentialSources.length} sources.`);
 
         const newMappings = [];
         const normalize = (s: string) => String(s).toLowerCase().replace(/[^a-z0-9]/g, '');
 
-        log(`Starting Discovery. Targets: ${targets.length}, Sources: ${potentialSources.length}`);
-
-        // DISCOVERY LOOP
+        // Loop Targets
         for (const tFile of targets) {
-            log(`Analyzing Target File: ${tFile.original_filename}`);
-            const tData = await loadFileData(tFile, 50);
-            if (!tData) {
-                serverLog(`Skipping file ${tFile.original_filename} - No data loaded.`);
-                continue;
-            }
-            serverLog(`Loaded target data. Headers: ${tData.headers.length}. Rows: ${tData.rowsCount}`);
+            log(`Analyzing Target: ${tFile.original_filename}`);
 
-            const targetColsDB = await db.query('SELECT * FROM file_columns WHERE file_id = ?', [tFile.id]);
+            // Fetch Columns (Metadata Only - NO BLOB LOADING)
+            const targetCols = await db.query('SELECT * FROM file_columns WHERE file_id = ?', [tFile.id]);
 
-            // We want to find the BEST matching Source file for this Target file
-            // Score = number of column matches
-            let bestSourceFile = null;
-            let bestSourceScore = 0;
-            let bestSourceMappings: any[] = [];
+            // Find Best Source File based on Column Name Matches
+            let bestSource = null;
+            let bestScore = 0;
+            let bestMappings: any[] = [];
 
             for (const sFile of potentialSources) {
-                const sData = await loadFileData(sFile, 50);
-                if (!sData) continue;
+                const sourceCols = await db.query('SELECT * FROM file_columns WHERE file_id = ?', [sFile.id]);
 
-                const sourceColsDB = await db.query('SELECT * FROM file_columns WHERE file_id = ?', [sFile.id]);
-
-                let fileMatchScore = 0;
+                let fileScore = 0;
                 let fileMappings = [];
 
-                // SAFETY LIMIT to prevent OOM
-                if (targetColsDB.length > 30) {
-                    serverLog(`Truncating columns from ${targetColsDB.length} to 30 for safety.`);
-                    targetColsDB.length = 30;
-                }
-
-                // Compare Columns
-                for (let tColIdx = 0; tColIdx < targetColsDB.length; tColIdx++) {
-                    const tCol = targetColsDB[tColIdx];
-                    // Yield to event loop every 10 columns to prevent blocking
-                    if (tColIdx % 10 === 0) await new Promise(resolve => setImmediate(resolve));
-
-                    const tVals = tData.colData.get(tCol.column_index);
-                    if (!tVals || tVals.size === 0) continue;
-
+                for (const tCol of targetCols) {
+                    // Find best match in source cols
                     let bestColMatch = null;
                     let bestColScore = 0;
 
-                    for (const sCol of sourceColsDB) {
-                        const sVals = sData.colData.get(sCol.column_index);
-                        if (!sVals || sVals.size === 0) continue;
+                    for (const sCol of sourceCols) {
+                        let score = 0;
+                        const n1 = normalize(tCol.column_name);
+                        const n2 = normalize(sCol.column_name);
 
-                        // Similarity Score
-                        // 1. Header Name Similarity
-                        let nameScore = 0;
-                        if (normalize(tCol.column_name) === normalize(sCol.column_name)) nameScore = 0.4;
-                        else if (normalize(tCol.column_name).includes(normalize(sCol.column_name))) nameScore = 0.2;
+                        // Exact match
+                        if (n1 === n2) score = 1.0;
+                        // Partial match (if long enough)
+                        else if (n1.length > 3 && n2.length > 3 && (n1.includes(n2) || n2.includes(n1))) score = 0.6;
 
-                        // 2. Data Content Overlap (Intersection)
-                        let hits = 0;
-                        let sampleSize = 0;
-                        // Check samples from Target against Source set
-                        for (const val of tVals) {
-                            sampleSize++;
-                            if (sVals.has(val)) hits++;
-                        }
+                        // ID/Code heuristic
+                        if ((n1 === 'id' || n1.endsWith('id')) && (n2 === 'id' || n2.endsWith('id'))) score += 0.2;
 
-                        const overlapScore = sampleSize > 0 ? (hits / sampleSize) : 0; // 0.0 - 1.0
-
-                        const totalScore = overlapScore + nameScore;
-
-                        if (totalScore > bestColScore && totalScore > 0.5) { // Threshold
-                            bestColScore = totalScore;
+                        if (score > bestColScore && score > 0.5) {
+                            bestColScore = score;
                             bestColMatch = sCol;
                         }
                     }
 
                     if (bestColMatch) {
-                        fileMatchScore += bestColScore;
+                        fileScore += bestColScore;
                         fileMappings.push({
                             sourceColumnId: bestColMatch.id,
                             targetColumnId: tCol.id,
-                            sourceColName: bestColMatch.column_name, // Capture name for Key guessing
+                            sourceColName: bestColMatch.column_name,
                             score: bestColScore,
-                            isKey: false,
                             codebookFileId: sFile.file_type === 'codebook' ? sFile.id : null
                         });
                     }
-                } // end column loop
+                }
 
-                // Normalize file score by number of columns mapped
-                // Favor files where MANY columns match
                 if (fileMappings.length > 0) {
-                    log(` -> Match Candidate: ${sFile.original_filename} (Score: ${fileMatchScore.toFixed(1)}, Mapped Cols: ${fileMappings.length})`);
-                    if (fileMatchScore > bestSourceScore) {
-                        bestSourceScore = fileMatchScore;
-                        bestSourceFile = sFile;
-                        bestSourceMappings = fileMappings;
+                    // Normalize score by file size (optional, but raw score is fine for now)
+                    if (fileScore > bestScore) {
+                        bestScore = fileScore;
+                        bestSource = sFile;
+                        bestMappings = fileMappings;
                     }
                 }
-            } // end source file loop
+            }
 
-            if (bestSourceFile && bestSourceMappings.length > 0) {
-                log(` => WINNER for ${tFile.original_filename} is ${bestSourceFile.original_filename}`);
+            if (bestSource && bestMappings.length > 0) {
+                log(` => Matched with ${bestSource.original_filename} (Score: ${bestScore.toFixed(1)})`);
 
-                // Identify PRIMARY KEY (Improved Heuristic)
-                // 1. Must be a MAPPED column (exists in both files)
-                // 2. Must have HIGH UNIQUENESS in both files (>90%)
-                // 3. Prefer ID-like names
+                // Add mappings
+                // Guess Primary Key (simply first ID-like column or first mapped column)
+                let keyCandidate = bestMappings.find(m => /id|key|kod|code/i.test(m.sourceColName));
+                if (!keyCandidate) keyCandidate = bestMappings[0];
 
-                const tData = await loadFileData(tFile, 50);
-                const sData = await loadFileData(bestSourceFile, 50);
-
-                let keyCandidate: any = null;
-                let bestKeyScore = 0;
-
-                for (const m of bestSourceMappings) {
-                    // Find column data
-                    const tCol = targetColsDB.find((c: any) => c.id === m.targetColumnId);
-                    const sCol = await db.query('SELECT * FROM file_columns WHERE id = ?', [m.sourceColumnId]);
-
-                    if (!tCol || !sCol[0]) continue;
-
-                    const tVals = tData?.colData.get(tCol.column_index);
-                    const sVals = sData?.colData.get(sCol[0].column_index);
-
-                    if (!tVals || !sVals) continue;
-
-                    // Calculate uniqueness (unique values / total values)
-                    const tUniqueness = tData?.rowsCount ? tVals.size / tData.rowsCount : 0;
-                    const sUniqueness = sData?.rowsCount ? sVals.size / sData.rowsCount : 0;
-
-                    // Both must have high uniqueness (>85%)
-                    if (tUniqueness < 0.85 || sUniqueness < 0.85) continue;
-
-                    // Calculate key score
-                    let keyScore = (tUniqueness + sUniqueness) / 2; // Average uniqueness
-
-                    // Bonus for ID-like names
-                    const colName = m.sourceColName.toLowerCase();
-                    if (['id', 'key', 'recid', 'accountnum', 'accountnumber', 'code', 'cislo'].includes(colName)) {
-                        keyScore += 0.3;
-                    } else if (/id$|^id|_id|num$|code$/.test(colName)) {
-                        keyScore += 0.15;
-                    }
-
-                    if (keyScore > bestKeyScore) {
-                        bestKeyScore = keyScore;
-                        keyCandidate = m;
-                        log(`   Key candidate: ${m.sourceColName} (score: ${keyScore.toFixed(2)}, uniqueness: T=${(tUniqueness * 100).toFixed(0)}% S=${(sUniqueness * 100).toFixed(0)}%)`);
-                    }
-                }
-
-                if (keyCandidate) {
-                    log(`   Selected Primary Key: ${keyCandidate.sourceColName}`);
-                } else {
-                    log(`   WARNING: No suitable Primary Key found for this mapping!`);
-                }
-
-                newMappings.push(...bestSourceMappings.map(m => ({
+                newMappings.push(...bestMappings.map(m => ({
                     sourceColumnId: m.sourceColumnId,
                     targetColumnId: m.targetColumnId,
-                    // Store metadata in note as JSON for frontend compatibility
                     note: JSON.stringify({
-                        isKey: (keyCandidate && m.sourceColumnId === keyCandidate.sourceColumnId) || false,
+                        isKey: keyCandidate && m.sourceColumnId === keyCandidate.sourceColumnId,
                         codebookFileId: m.codebookFileId,
                         autoDiscovered: true,
-                        score: m.score.toFixed(2)
+                        strategy: 'metadata_name_match'
                     })
                 })));
             }
-
-            // --- B. FIND REFERENCES (Target -> Other Targets for Consistency Check) ---
-            for (const tCol of targetColsDB) {
-                // Only check ID-like columns
-                if (!/id|code|num|cislo|kod/i.test(tCol.column_name)) continue;
-
-                const tVals = tData.colData.get(tCol.column_index);
-                if (!tVals || tVals.size === 0) continue;
-
-                for (const otherTarget of targets) {
-                    if (otherTarget.id === tFile.id) continue;
-
-                    const otherData = await loadFileData(otherTarget, 50);
-                    if (!otherData) continue;
-
-                    const otherCols = await db.query('SELECT * FROM file_columns WHERE file_id = ?', [otherTarget.id]);
-
-                    for (const oCol of otherCols) {
-                        // Strict Name Match for Key columns
-                        if (normalize(tCol.column_name) !== normalize(oCol.column_name)) continue;
-
-                        const oVals = otherData.colData.get(oCol.column_index);
-                        if (!oVals) continue;
-
-                        // Check if oCol is unique enough to be a PK (>90% unique values)
-                        if (oVals.size < (otherData.rowsCount * 0.9)) continue;
-
-                        // Check overlap
-                        let hits = 0, sample = 0;
-                        for (const val of tVals) {
-                            sample++;
-                            if (oVals.has(val)) hits++;
-                        }
-
-                        if (sample > 0 && (hits / sample) > 0.7) {
-                            log(`Found Reference: ${tFile.original_filename}.${tCol.column_name} -> ${otherTarget.original_filename}`);
-                            newMappings.push({
-                                sourceColumnId: null,
-                                targetColumnId: tCol.id,
-                                note: JSON.stringify({
-                                    isKey: false,
-                                    codebookFileId: otherTarget.id,
-                                    refColumnId: oCol.id,
-                                    autoDiscovered: true,
-                                    type: 'reference'
-                                })
-                            });
-                            break;
-                        }
-                    }
-                }
-            }
         }
 
-        // SAVE to DB (Magic Apply)
+        // SAVE to DB
         if (newMappings.length > 0) {
-            // Clear old mappings to avoid conflicts/duplicates
             await db.run('DELETE FROM column_mappings WHERE project_id = ?', [projectId]);
-
             for (const m of newMappings) {
-                // Skip reference-only mappings (no source column) - they are stored in note
-                if (!m.sourceColumnId) continue;
-
                 await db.run('INSERT INTO column_mappings (project_id, source_column_id, target_column_id, mapping_note) VALUES (?, ?, ?, ?)',
                     [projectId, m.sourceColumnId, m.targetColumnId, m.note]);
             }
@@ -659,12 +446,9 @@ app.post('/api/projects/:id/auto-map', async (req, res) => {
 
         res.json({ mappings: newMappings, logs: debugLogs });
 
-    } catch (error) {
-        serverLog(`Auto-map error: ${error}`);
-        console.error('Auto-map error:', error);
-        // Ensure we always return JSON, not HTML
-        res.setHeader('Content-Type', 'application/json');
-        res.status(500).json({ error: String((error as Error).message || error), logs: debugLogs });
+    } catch (e) {
+        log(`Error: ${(e as Error).message}`);
+        res.status(500).json({ error: (e as Error).message, logs: debugLogs });
     }
 });
 
