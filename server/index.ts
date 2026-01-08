@@ -675,6 +675,7 @@ app.post('/api/projects/:id/validate', async (req, res) => {
 
     try {
         serverLog(`Starting Validation for Project ${projectId}`);
+        const allFiles = await db.query("SELECT * FROM imported_files WHERE project_id = ?", [projectId]);
 
         const getFile = (id: number) => allFiles.find((f: any) => f.id === id);
 
