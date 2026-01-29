@@ -747,3 +747,15 @@ tr:last-child td {
   cursor: pointer;
   accent-color: var(--accent-primary);
 }
+
+/* Reconciliation Warning Styles */
+.error-item.warning {
+  background: #fffbeb;
+  border-color: #fcd34d;
+}
+
+.error-item.warning .error-count {
+  background: #fef3c7;
+  color: #d97706;
+  border-color: #fcd34d;
+}

@@ -51,8 +51,19 @@ interface ValidationError {
   totalFkValues: number;
 }
 
+interface ReconciliationError {
+  sourceTable: string;
+  sourceColumn: string;
+  targetTable: string;
+  targetColumn: string;
+  joinKey: string;
+  mismatches: { key: string; source: string; target: string }[];
+  count: number | string;
+}
+
 interface ValidationResult {
   errors: ValidationError[];
+  reconciliation?: ReconciliationError[];
   summary: {
     totalChecks: number;
     passed: number;
@@ -424,6 +435,33 @@ function App() {
                           <div className="missing-values">
                             Chybí: {err.missingValues.join(', ')}
                             {err.missingCount > 10 && ` ... a dalších ${err.missingCount - 10}`}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Reconciliation Errors */}
+                  {validationResult.reconciliation && validationResult.reconciliation.length > 0 && (
+                    <div className="validation-errors" style={{ marginTop: '1rem' }}>
+                      <h4 style={{ margin: '0 0 0.5rem 0', color: '#d97706' }}>⚠️ Neshody v datech (Reconciliation)</h4>
+                      {validationResult.reconciliation.map((err, i) => (
+                        <div key={i} className="error-item warning">
+                          <div className="error-header">
+                            <strong>{err.sourceTable}.{err.sourceColumn}</strong>
+                            <span className="arrow">≠</span>
+                            <strong>{err.targetTable}.{err.targetColumn}</strong>
+                            <span className="error-count" style={{ background: '#fef3c7', color: '#d97706', borderColor: '#fcd34d' }}>{err.count} neshod</span>
+                          </div>
+                          <div className="missing-values">
+                            <div style={{ marginBottom: '0.5rem', fontWeight: 600, fontSize: '0.75rem' }}>Spojeno přes klíč: {err.joinKey}</div>
+                            <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                              {err.mismatches.map((m, j) => (
+                                <li key={j} style={{ borderBottom: '1px solid #eee', padding: '2px 0' }}>
+                                  <span style={{ color: '#6b7280' }}>[{m.key}]</span>: <span style={{ color: '#ef4444' }}>"{m.source}"</span> vs <span style={{ color: '#10b981' }}>"{m.target}"</span>
+                                </li>
+                              ))}
+                            </ul>
                           </div>
                         </div>
                       ))}

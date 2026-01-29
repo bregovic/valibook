@@ -433,7 +433,7 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
     const { projectId } = req.params;
 
     try {
-        // Get all columns with links (FK columns)
+        // Get all columns with links
         const fkColumns = await prisma.column.findMany({
             where: {
                 projectId,
@@ -449,65 +449,127 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
                 success: true,
                 message: 'No linked columns to validate',
                 errors: [],
+                reconciliation: [],
                 summary: { totalChecks: 0, passed: 0, failed: 0 }
             });
         }
 
-        const validationErrors: Array<{
-            fkTable: string;
-            fkColumn: string;
-            pkTable: string;
-            pkColumn: string;
-            missingValues: string[];
-            missingCount: number;
-            totalFkValues: number;
-        }> = [];
+        // 1. INTEGRITY CHECKS (Orphans) - SQL Optimized
+        const integrityErrors = [];
 
         for (const fkCol of fkColumns) {
             if (!fkCol.linkedToColumn) continue;
 
-            // Get all FK values
-            const fkValues = await prisma.columnValue.findMany({
-                where: { columnId: fkCol.id },
-                select: { value: true }
-            });
-            const fkValuesSet = new Set(fkValues.map(v => v.value).filter(v => v !== ''));
+            const orphans = await prisma.$queryRaw<Array<{ value: string }>>`
+                SELECT v.value 
+                FROM "column_values" v
+                WHERE v."columnId" = ${fkCol.id}
+                  AND v.value != ''
+                  AND NOT EXISTS (
+                    SELECT 1 FROM "column_values" target
+                    WHERE target."columnId" = ${fkCol.linkedToColumnId}
+                      AND target.value = v.value
+                  )
+                LIMIT 11
+            `;
 
-            // Get all PK values
-            const pkValues = await prisma.columnValue.findMany({
-                where: { columnId: fkCol.linkedToColumnId! },
-                select: { value: true }
-            });
-            const pkValuesSet = new Set(pkValues.map(v => v.value).filter(v => v !== ''));
+            if (orphans.length > 0) {
+                // Get approx count
+                const countRes = await prisma.$queryRaw<Array<{ count: bigint }>>`
+                    SELECT COUNT(*) as count
+                    FROM "column_values" v
+                    WHERE v."columnId" = ${fkCol.id}
+                      AND v.value != ''
+                      AND NOT EXISTS (
+                        SELECT 1 FROM "column_values" target
+                        WHERE target."columnId" = ${fkCol.linkedToColumnId}
+                          AND target.value = v.value
+                      )
+                `;
 
-            // Find missing values (FK values that don't exist in PK)
-            const missingValues: string[] = [];
-            for (const val of fkValuesSet) {
-                if (!pkValuesSet.has(val)) {
-                    missingValues.push(val);
-                }
-            }
-
-            if (missingValues.length > 0) {
-                validationErrors.push({
+                integrityErrors.push({
                     fkTable: fkCol.tableName,
                     fkColumn: fkCol.columnName,
                     pkTable: fkCol.linkedToColumn.tableName,
                     pkColumn: fkCol.linkedToColumn.columnName,
-                    missingValues: missingValues.slice(0, 10), // Limit to first 10
-                    missingCount: missingValues.length,
-                    totalFkValues: fkValuesSet.size
+                    missingValues: orphans.slice(0, 10).map(o => o.value),
+                    missingCount: Number(countRes[0].count),
+                    totalFkValues: 0
                 });
+            }
+        }
+
+        // 2. RECONCILIATION CHECKS (Value Mismatches)
+        // Group by Table Pair to identify Join Keys vs Value Checks
+        const tablePairs = new Map<string, { keyLink: any, valueLinks: any[] }>();
+
+        for (const col of fkColumns) {
+            if (!col.linkedToColumn) continue;
+            const pairKey = `${col.tableName}|${col.linkedToColumn.tableName}`;
+
+            if (!tablePairs.has(pairKey)) {
+                tablePairs.set(pairKey, { keyLink: null, valueLinks: [] });
+            }
+            const group = tablePairs.get(pairKey)!;
+
+            // Assumption: If target is PK, it's used as JOIN KEY. Otherwise it's a value to check.
+            if (col.linkedToColumn.isPrimaryKey) {
+                if (!group.keyLink) group.keyLink = col;
+            } else {
+                group.valueLinks.push(col);
+            }
+        }
+
+        const reconciliationErrors = [];
+
+        for (const [pairKey, group] of tablePairs.entries()) {
+            if (!group.keyLink || group.valueLinks.length === 0) continue;
+
+            for (const valCol of group.valueLinks) {
+                // Check for value mismatch where Keys match
+                const mismatches = await prisma.$queryRaw<Array<{ key: string, source: string, target: string }>>`
+                    SELECT 
+                        s_key.value as key,
+                        s_val.value as source,
+                        t_val.value as target
+                    FROM "column_values" s_key
+                    JOIN "column_values" t_key 
+                        ON s_key.value = t_key.value 
+                        AND t_key."columnId" = ${group.keyLink.linkedToColumnId}
+                    JOIN "column_values" s_val
+                        ON s_val."rowIndex" = s_key."rowIndex"
+                        AND s_val."columnId" = ${valCol.id}
+                    JOIN "column_values" t_val
+                        ON t_val."rowIndex" = t_key."rowIndex"
+                        AND t_val."columnId" = ${valCol.linkedToColumnId}
+                    WHERE s_key."columnId" = ${group.keyLink.id}
+                      AND s_val.value != t_val.value
+                    LIMIT 11
+                `;
+
+                if (mismatches.length > 0) {
+                    // For perf, we use the length as min count check
+                    reconciliationErrors.push({
+                        sourceTable: valCol.tableName,
+                        sourceColumn: valCol.columnName,
+                        targetTable: valCol.linkedToColumn?.tableName,
+                        targetColumn: valCol.linkedToColumn?.columnName,
+                        joinKey: group.keyLink.columnName,
+                        mismatches: mismatches.slice(0, 10),
+                        count: mismatches.length >= 11 ? '10+' : mismatches.length
+                    });
+                }
             }
         }
 
         res.json({
             success: true,
-            errors: validationErrors,
+            errors: integrityErrors,
+            reconciliation: reconciliationErrors,
             summary: {
                 totalChecks: fkColumns.length,
-                passed: fkColumns.length - validationErrors.length,
-                failed: validationErrors.length
+                passed: fkColumns.length - (integrityErrors.length + reconciliationErrors.length),
+                failed: integrityErrors.length + reconciliationErrors.length
             }
         });
 
