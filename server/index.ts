@@ -719,7 +719,7 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
         }
 
         // Generate Protocol
-        const totalFailed = integrityErrors.length + reconciliationErrors.length + forbiddenErrors.length;
+        const totalFailed = allChecks.filter(c => c.status === 'ERROR').length;
         const totalPassed = allChecks.filter(c => c.status === 'OK').length;
         const status = totalFailed === 0 ? 'ÚSPĚŠNÉ' : 'S CHYBAMI';
         const timestamp = new Date().toLocaleString('cs-CZ');
@@ -730,34 +730,61 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
         protocol += `Stav: ${status}\n`;
         protocol += `----------------------------------------\n`;
         protocol += `Celkem kontrol: ${allChecks.length}\n`;
+        protocol += `Úspěšné: ${totalPassed}\n`;
         protocol += `Selhalo: ${totalFailed}\n\n`;
 
-        if (forbiddenErrors.length > 0) {
-            protocol += `[ZAKÁZANÉ HODNOTY]\n`;
-            forbiddenErrors.forEach(e => {
-                protocol += `- ${e.targetTable}.${e.column} obsahuje ${e.count} zakázaných hodnot (dle ${e.forbiddenTable}): ${e.foundValues.join(', ')}...\n`;
-            });
-            protocol += `\n`;
-        }
+        protocol += `[METODIKA VALIDACE]\n`;
+        protocol += `1. INTEGRITA (Foreign Key)\n`;
+        protocol += `   - Metoda: SQL NOT EXISTS query.\n`;
+        protocol += `   - Princip: Hledá hodnoty ve zdrojovém sloupci, které nemají odpovídající záznam v cílové (master) tabulce.\n`;
+        protocol += `2. REKONSILIACE (Shoda dat)\n`;
+        protocol += `   - Metoda: SQL Comparison přes JOIN klíč.\n`;
+        protocol += `   - Princip: Spojí řádky tabulek přes definovaný klíč a porovnává hodnoty v ostatních sloupcích.\n`;
+        protocol += `3. ZAKÁZANÉ HODNOTY (Blacklist)\n`;
+        protocol += `   - Metoda: SQL INTERSECT.\n`;
+        protocol += `   - Princip: Pro každou tabulku typu 'FORBIDDEN' hledá průnik hodnot s tabulkami stejného názvu sloupce.\n\n`;
 
-        if (integrityErrors.length > 0) {
-            protocol += `[INTEGRITA - SIROTCI]\n`;
-            integrityErrors.forEach(e => {
-                protocol += `- ${e.fkTable}.${e.fkColumn} -> ${e.pkTable}: ${e.missingCount} chybějících\n`;
-            });
+        protocol += `[DETAILNÍ VÝPIS VŠECH KONTROL]\n`;
+        allChecks.forEach((check, index) => {
+            const icon = check.status === 'OK' ? '✅' : '❌';
+            const records = check.checked > 0 ? `${check.checked} záznamů` : (check.type === 'ZAKÁZANÉ' ? 'Analýza průniku' : 'N/A');
+            protocol += `${index + 1}. [${check.type}] ${check.label}\n`;
+            protocol += `   Stav: ${icon} ${check.status}\n`;
+            protocol += `   Rozsah: ${records}\n`;
+            if (check.status === 'ERROR') {
+                protocol += `   Chyb: ${check.failed}\n`;
+            }
             protocol += `\n`;
-        }
+        });
 
-        if (reconciliationErrors.length > 0) {
-            protocol += `[REKONSILIACE - NESHODY]\n`;
-            reconciliationErrors.forEach(e => {
-                protocol += `- ${e.sourceTable} vs ${e.targetTable} (${e.joinKey}): ${e.count} neshod\n`;
-            });
-            protocol += `\n`;
-        }
+        if (totalFailed > 0) {
+            protocol += `[DETAIL CHYB]\n`;
+            if (forbiddenErrors.length > 0) {
+                protocol += `--- ZAKÁZANÉ HODNOTY ---\n`;
+                forbiddenErrors.forEach(e => {
+                    protocol += `- ${e.targetTable}.${e.column} obsahuje ${e.count} zakázaných hodnot (dle ${e.forbiddenTable}): ${e.foundValues.join(', ')}...\n`;
+                });
+                protocol += `\n`;
+            }
 
-        if (totalFailed === 0) {
-            protocol += `Všechna data jsou konzistentní. Integrita, hodnoty i zakázané položky jsou v pořádku.\n`;
+            if (integrityErrors.length > 0) {
+                protocol += `--- INTEGRITA (SIROTCI) ---\n`;
+                integrityErrors.forEach(e => {
+                    protocol += `- ${e.fkTable}.${e.fkColumn} -> ${e.pkTable}: ${e.missingCount} chybějících\n`;
+                });
+                protocol += `\n`;
+            }
+
+            if (reconciliationErrors.length > 0) {
+                protocol += `--- REKONSILIACE (NESHODY) ---\n`;
+                reconciliationErrors.forEach(e => {
+                    protocol += `- ${e.sourceTable} vs ${e.targetTable} (${e.joinKey}): ${e.count} neshod\n`;
+                });
+                protocol += `\n`;
+            }
+        } else {
+            protocol += `[ZÁVĚR]\n`;
+            protocol += `Všechna data jsou konzistentní. Nebyly nalezeny žádné chyby.\n`;
         }
 
         res.json({
