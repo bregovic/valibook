@@ -79,6 +79,7 @@ function App() {
   const [newProjectName, setNewProjectName] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [hideEmptyColumns, setHideEmptyColumns] = useState(false);
   const [uploadType, setUploadType] = useState<'SOURCE' | 'TARGET' | 'FORBIDDEN' | 'RANGE'>('SOURCE');
   const [linkSuggestions, setLinkSuggestions] = useState<LinkSuggestion[]>([]);
   const [selectedSuggestionIds, setSelectedSuggestionIds] = useState<Set<string>>(new Set());
@@ -231,7 +232,23 @@ function App() {
       const data = await res.json();
 
       if (data.success) {
-        setLinkSuggestions(data.suggestions);
+        // Filter out suggestions that are already applied
+        const activeLinks = new Set<string>();
+        tables.forEach(t => t.columns.forEach(c => {
+          if (c.linkedToColumnId) activeLinks.add(`${c.id}|${c.linkedToColumnId}`);
+        }));
+
+        const newSuggestions = data.suggestions.filter((s: LinkSuggestion) =>
+          !activeLinks.has(`${s.sourceColumnId}|${s.targetColumnId}`)
+        );
+
+        setLinkSuggestions(newSuggestions);
+
+        if (newSuggestions.length === 0 && data.suggestions.length > 0) {
+          alert('Všechny nalezené vazby jsou již nastaveny.');
+        } else if (newSuggestions.length === 0) {
+          alert('Nebyly nalezeny žádné nové vazby.');
+        }
       }
     } catch (err) {
       alert('Detection failed: ' + (err as Error).message);
@@ -435,6 +452,18 @@ function App() {
                     )}
                   </div>
 
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: '1rem' }}>
+                    <input
+                      type="checkbox"
+                      id="hideEmpty"
+                      checked={hideEmptyColumns}
+                      onChange={(e) => setHideEmptyColumns(e.target.checked)}
+                    />
+                    <label htmlFor="hideEmpty" style={{ fontSize: '0.9rem', cursor: 'pointer', userSelect: 'none' }}>
+                      Skrýt prázdné
+                    </label>
+                  </div>
+
                   {tables.length > 0 && (
                     <>
                       <button
@@ -548,30 +577,47 @@ function App() {
                   </div>
 
                   <div className="suggestions-list">
-                    {linkSuggestions.map((s, i) => (
-                      <div key={i} className="suggestion-item">
-                        <div style={{ display: 'flex', alignItems: 'center' }}>
-                          <input
-                            type="checkbox"
-                            style={{ marginRight: '1rem', cursor: 'pointer' }}
-                            checked={selectedSuggestionIds.has(getSuggestionKey(s))}
-                            onChange={() => toggleSelection(s)}
-                          />
-                          <span className="suggestion-text">
-                            <strong>{s.sourceTable}.{s.sourceColumn}</strong>
-                            <span className="arrow">→</span>
-                            <strong>{s.targetTable}.{s.targetColumn}</strong>
-                          </span>
-                        </div>
-
-                        <div className="suggestion-actions">
-                          <span className="match-badge">{s.matchPercentage}% shoda</span>
-                          <button className="apply-btn" onClick={() => applyLink(s)}>
-                            ✓ Použít
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                    <table className="suggestions-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead>
+                        <tr>
+                          <th style={{ width: '40px' }}>
+                            <input
+                              type="checkbox"
+                              checked={linkSuggestions.length > 0 && selectedSuggestionIds.size === linkSuggestions.length}
+                              onChange={toggleSelectAll}
+                            />
+                          </th>
+                          <th>Zdrojový sloupec</th>
+                          <th>Cílový sloupec</th>
+                          <th>Shoda</th>
+                          <th>Akce</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {linkSuggestions.map((s, i) => (
+                          <tr key={i} className="suggestion-item">
+                            <td>
+                              <input
+                                type="checkbox"
+                                checked={selectedSuggestionIds.has(getSuggestionKey(s))}
+                                onChange={() => toggleSelection(s)}
+                              />
+                            </td>
+                            <td><strong>{s.sourceTable}</strong>.<br />{s.sourceColumn}</td>
+                            <td><strong>{s.targetTable}</strong>.<br />{s.targetColumn}</td>
+                            <td>
+                              <span className="match-badge">{s.matchPercentage}%</span>
+                              <div style={{ fontSize: '0.75rem', color: '#666' }}>({s.commonValues} shod)</div>
+                            </td>
+                            <td>
+                              <button className="apply-btn" onClick={() => applyLink(s)}>
+                                ✓ Použít
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               )}
@@ -605,40 +651,42 @@ function App() {
                           </tr>
                         </thead>
                         <tbody>
-                          {table.columns.map(col => (
-                            <tr key={col.id}>
-                              <td className="col-name">{col.columnName}</td>
-                              <td>
-                                <button
-                                  className={`pk-btn ${col.isPrimaryKey ? 'active' : ''}`}
-                                  onClick={() => togglePrimaryKey(col.id, col.isPrimaryKey)}
-                                  title="Primární klíč"
-                                >
-                                  🔑
-                                </button>
-                              </td>
-                              <td className="stat">{col.uniqueCount}</td>
-                              <td className="stat">{col.nullCount}</td>
-                              <td className="samples">
-                                {col.sampleValues?.slice(0, 3).join(', ')}
-                                {(col.sampleValues?.length || 0) > 3 && '...'}
-                              </td>
-                              <td>
-                                <select
-                                  value={col.linkedToColumnId || ''}
-                                  onChange={(e) => setColumnLink(col.id, e.target.value || null)}
-                                >
-                                  <option value="">—</option>
-                                  {getPrimaryKeyColumns()
-                                    .filter(pk => pk.id !== col.id)
-                                    .map(pk => (
-                                      <option key={pk.id} value={pk.id}>{pk.label}</option>
-                                    ))
-                                  }
-                                </select>
-                              </td>
-                            </tr>
-                          ))}
+                          {table.columns
+                            .filter(col => !hideEmptyColumns || (col.uniqueCount ?? 0) > 0)
+                            .map(col => (
+                              <tr key={col.id}>
+                                <td className="col-name">{col.columnName}</td>
+                                <td>
+                                  <button
+                                    className={`pk-btn ${col.isPrimaryKey ? 'active' : ''}`}
+                                    onClick={() => togglePrimaryKey(col.id, col.isPrimaryKey)}
+                                    title="Primární klíč"
+                                  >
+                                    🔑
+                                  </button>
+                                </td>
+                                <td className="stat">{col.uniqueCount}</td>
+                                <td className="stat">{col.nullCount}</td>
+                                <td className="samples">
+                                  {col.sampleValues?.slice(0, 3).join(', ')}
+                                  {(col.sampleValues?.length || 0) > 3 && '...'}
+                                </td>
+                                <td>
+                                  <select
+                                    value={col.linkedToColumnId || ''}
+                                    onChange={(e) => setColumnLink(col.id, e.target.value || null)}
+                                  >
+                                    <option value="">—</option>
+                                    {getPrimaryKeyColumns()
+                                      .filter(pk => pk.id !== col.id)
+                                      .map(pk => (
+                                        <option key={pk.id} value={pk.id}>{pk.label}</option>
+                                      ))
+                                    }
+                                  </select>
+                                </td>
+                              </tr>
+                            ))}
                         </tbody>
                       </table>
                     </div>

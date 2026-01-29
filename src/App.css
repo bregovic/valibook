@@ -329,9 +329,10 @@ body {
 
 /* Tables Grid */
 .tables-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(600px, 1fr));
-  gap: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 3rem;
+  width: 100%;
 }
 
 .table-card {
@@ -510,33 +511,22 @@ tr:last-child td {
 }
 
 .suggestions-list {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.suggestion-item {
-  display: flex;
-  align-items: center;
-  background: aliceblue;
-  /* Very light blue */
-  padding: 0.75rem 1rem;
+  background: #fff;
   border-radius: var(--radius-sm);
-  border: 1px solid #dbeafe;
-  justify-content: space-between;
+  overflow: hidden;
+  border: 1px solid var(--border);
 }
 
-.suggestion-text {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  font-family: 'Monaco', monospace;
-  font-size: 0.9rem;
-  color: var(--text-primary);
+.suggestions-list table {
+  margin: 0;
 }
 
-.suggestion-text .arrow {
-  color: var(--text-muted);
+.suggestions-list tr:hover td {
+  background-color: #f8fafc;
+}
+
+.suggestions-list td {
+  vertical-align: middle;
 }
 
 .match-badge {
