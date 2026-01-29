@@ -759,3 +759,17 @@ tr:last-child td {
   color: #d97706;
   border-color: #fcd34d;
 }
+
+.validation-protocol {
+  background: #f8fafc;
+  padding: 1rem;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  font-family: monospace;
+  font-size: 0.85rem;
+  white-space: pre-wrap;
+  margin-bottom: 1.5rem;
+  color: #334155;
+  max-height: 200px;
+  overflow-y: auto;
+}

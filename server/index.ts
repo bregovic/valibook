@@ -136,6 +136,24 @@ app.post('/api/projects/:projectId/upload', upload.single('file'), async (req, r
     try {
         const filePath = req.file.path;
         const tableName = req.file.originalname.replace(/\.[^/.]+$/, ''); // Remove extension
+        const overwrite = req.query.overwrite === 'true';
+
+        // Check for duplicate table
+        const existingCount = await prisma.column.count({
+            where: { projectId, tableName }
+        });
+
+        if (existingCount > 0) {
+            if (!overwrite) {
+                fs.unlinkSync(filePath); // Clean up uploaded file
+                return res.status(409).json({ error: 'Table already exists', tableName, requiresConfirmation: true });
+            }
+
+            // Delete existing
+            await prisma.column.deleteMany({
+                where: { projectId, tableName }
+            });
+        }
 
         // Parse Excel
         const workbook = XLSX.readFile(filePath);
@@ -562,14 +580,49 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
             }
         }
 
+        // Generate Protocol
+        const totalFailed = integrityErrors.length + reconciliationErrors.length;
+        const totalPassed = fkColumns.length - (integrityErrors.length + reconciliationErrors.length);
+        const status = totalFailed === 0 ? 'ÚSPĚŠNÉ' : 'S CHYBAMI';
+        const timestamp = new Date().toLocaleString('cs-CZ');
+
+        let protocol = `PROTOKOL O VALIDACI\n`;
+        protocol += `=====================\n`;
+        protocol += `Datum: ${timestamp}\n`;
+        protocol += `Stav: ${status}\n`;
+        protocol += `----------------------------------------\n`;
+        protocol += `Celkem kontrol: ${fkColumns.length + reconciliationErrors.length}\n`;
+        protocol += `Selhalo: ${totalFailed}\n\n`;
+
+        if (integrityErrors.length > 0) {
+            protocol += `[INTEGRITA - SIROTCI]\n`;
+            integrityErrors.forEach(e => {
+                protocol += `- ${e.fkTable}.${e.fkColumn} -> ${e.pkTable}: ${e.missingCount} chybějících\n`;
+            });
+            protocol += `\n`;
+        }
+
+        if (reconciliationErrors.length > 0) {
+            protocol += `[REKONSILIACE - NESHODY]\n`;
+            reconciliationErrors.forEach(e => {
+                protocol += `- ${e.sourceTable} vs ${e.targetTable} (${e.joinKey}): ${e.count} neshod\n`;
+            });
+            protocol += `\n`;
+        }
+
+        if (totalFailed === 0) {
+            protocol += `Všechna data jsou konzistentní. Integrita i hodnoty odpovídají.\n`;
+        }
+
         res.json({
             success: true,
             errors: integrityErrors,
             reconciliation: reconciliationErrors,
+            protocol,
             summary: {
                 totalChecks: fkColumns.length,
-                passed: fkColumns.length - (integrityErrors.length + reconciliationErrors.length),
-                failed: integrityErrors.length + reconciliationErrors.length
+                passed: totalPassed,
+                failed: totalFailed
             }
         });
 

@@ -64,6 +64,7 @@ interface ReconciliationError {
 interface ValidationResult {
   errors: ValidationError[];
   reconciliation?: ReconciliationError[];
+  protocol?: string;
   summary: {
     totalChecks: number;
     passed: number;
@@ -150,27 +151,39 @@ function App() {
     setUploading(true);
     const files = Array.from(e.target.files);
 
+    const uploadSingleFile = async (file: File, allowOverwrite = false): Promise<void> => {
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('tableType', uploadType);
+
+      const url = `${API_URL}/projects/${selectedProject.id}/upload` + (allowOverwrite ? '?overwrite=true' : '');
+
+      try {
+        const res = await fetch(url, { method: 'POST', body: formData });
+
+        if (res.status === 409) {
+          const data = await res.json();
+          if (confirm(`Tabulka '${data.tableName}' již existuje. Chcete ji přepsat? Stará data budou smazána.`)) {
+            await uploadSingleFile(file, true);
+          }
+          return;
+        }
+
+        const result = await res.json();
+        if (!res.ok || !result.success) {
+          throw new Error(result.error || 'Upload failed');
+        }
+      } catch (err) {
+        alert(`Error uploading ${file.name}: ${(err as Error).message}`);
+      }
+    };
+
     try {
       for (const file of files) {
-        const formData = new FormData();
-        formData.append('file', file);
-        formData.append('tableType', uploadType);
-
-        const res = await fetch(`${API_URL}/projects/${selectedProject.id}/upload`, {
-          method: 'POST',
-          body: formData
-        });
-        const result = await res.json();
-
-        if (!result.success) {
-          alert(`Error uploading ${file.name}: ${result.error}`);
-        }
+        await uploadSingleFile(file);
       }
-
-      loadTables(selectedProject.id);
+      await loadTables(selectedProject.id);
       loadProjects();
-    } catch (err) {
-      alert('Upload failed: ' + (err as Error).message);
     } finally {
       setUploading(false);
       e.target.value = '';
@@ -421,6 +434,12 @@ function App() {
                     </div>
                     <button className="close-btn" onClick={() => setValidationResult(null)}>×</button>
                   </div>
+
+                  {validationResult.protocol && (
+                    <pre className="validation-protocol">
+                      {validationResult.protocol}
+                    </pre>
+                  )}
 
                   {validationResult.errors.length > 0 && (
                     <div className="validation-errors">
