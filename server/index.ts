@@ -122,11 +122,11 @@ app.delete('/api/projects/:id', async (req, res) => {
 // Upload Excel file and extract columns with data
 app.post('/api/projects/:projectId/upload', upload.single('file'), async (req, res) => {
     const { projectId } = req.params;
-    const tableType = req.body.tableType as 'SOURCE' | 'TARGET' | 'CODEBOOK';
+    const tableType = req.body.tableType as 'SOURCE' | 'TARGET';
 
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-    if (!['SOURCE', 'TARGET', 'CODEBOOK'].includes(tableType)) {
-        return res.status(400).json({ error: 'Invalid table type. Must be SOURCE, TARGET, or CODEBOOK' });
+    if (!['SOURCE', 'TARGET'].includes(tableType)) {
+        return res.status(400).json({ error: 'Invalid table type. Must be SOURCE or TARGET' });
     }
 
     try {
