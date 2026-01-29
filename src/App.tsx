@@ -79,6 +79,7 @@ function App() {
   const [newProjectName, setNewProjectName] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
   const [hideEmptyColumns, setHideEmptyColumns] = useState(false);
   const [uploadType, setUploadType] = useState<'SOURCE' | 'TARGET' | 'FORBIDDEN' | 'RANGE'>('SOURCE');
   const [linkSuggestions, setLinkSuggestions] = useState<LinkSuggestion[]>([]);
@@ -132,6 +133,7 @@ function App() {
     e.stopPropagation();
     if (!confirm('Opravdu chcete smazat tento projekt? Všechna data budou ztracena.')) return;
 
+    setDeletingId(projectId);
     try {
       const res = await fetch(`${API_URL}/projects/${projectId}`, { method: 'DELETE' });
       if (res.ok) {
@@ -143,6 +145,8 @@ function App() {
       }
     } catch (err) {
       alert('Failed to delete project');
+    } finally {
+      setDeletingId(null);
     }
   };
 
@@ -402,8 +406,9 @@ function App() {
                     className="delete-project-btn"
                     onClick={(e) => deleteProject(e, p.id)}
                     title="Smazat projekt"
+                    disabled={deletingId === p.id}
                   >
-                    🗑️
+                    {deletingId === p.id ? '⏳' : '🗑️'}
                   </button>
                 </div>
               </li>
