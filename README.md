@@ -1,73 +1,67 @@
-# React + TypeScript + Vite
+# Valibook - Excel Validation Tool
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Nástroj pro validaci a rekonsolidaci dat z Excel souborů.
 
-Currently, two official plugins are available:
+## 🎯 Funkce
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- **Upload Excel souborů** - zdrojové, kontrolované a číselníky
+- **Evidence sloupců** - automatická detekce hlaviček a vzorových dat
+- **Primární klíče** - označení klíčových sloupců
+- **Vazby** - definice vztahů mezi sloupci (FK → PK)
+- **Validace** - kontrola dat proti pravidlům a číselníkům
 
-## React Compiler
+## 🛠️ Tech Stack
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- **Frontend**: React + Vite + TypeScript
+- **Backend**: Express.js + TypeScript
+- **Database**: PostgreSQL (Railway)
+- **ORM**: Prisma
+- **Excel**: xlsx (SheetJS)
 
-## Expanding the ESLint configuration
+## 🚀 Spuštění
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### Lokální vývoj
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+1. Nastavte environment variables:
+```bash
+cp .env.example .env
+# Nastavte DATABASE_URL pro Railway PostgreSQL
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
-
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+2. Nainstalujte závislosti:
+```bash
+npm install
 ```
+
+3. Inicializujte databázi:
+```bash
+npm run db:push
+npm run db:generate
+```
+
+4. Spusťte dev server:
+```bash
+npm run dev
+```
+
+### Railway Deployment
+
+Projekt je napojen na Railway s PostgreSQL databází.
+
+## 📊 Databázové schéma
+
+```
+projects        ──┬── imported_files ──┬── columns
+                  │                    │
+                  │                    ├── isPrimaryKey
+                  │                    ├── sampleValues (JSON)
+                  │                    └── linkedToColumnId (FK)
+```
+
+## 📝 Workflow
+
+1. **Vytvoř projekt** - pojmenuj validační úlohu
+2. **Nahraj soubory** - source, target, codebooks
+3. **Označ strukturu** - primární klíče, vazby
+4. **Spusť validaci** - kontrola dat
+5. **Export reportu** - přehled chyb

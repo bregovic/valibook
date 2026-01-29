@@ -1,0 +1,98 @@
+// Valibook - Excel Validation Tool
+// Simplified PostgreSQL schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// PROJECTS - Validační projekty
+// ============================================
+model Project {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  columns Column[]
+
+  @@map("projects")
+}
+
+// ============================================
+// COLUMNS - Hlavní evidence sloupců
+// ============================================
+// Obsahuje: název tabulky, název sloupce, typ (source/target), vazby
+// ============================================
+enum TableType {
+  SOURCE   // Zdrojová tabulka (očekávaný stav)
+  TARGET   // Kontrolovaná tabulka (testovaný)
+  CODEBOOK // Číselník
+}
+
+model Column {
+  id           String    @id @default(cuid())
+  projectId    String
+  
+  // Identifikace zdroje
+  tableName    String    // Název souboru/tabulky v Excelu
+  columnName   String    // Název sloupce
+  columnIndex  Int       // Pozice v souboru (0-indexed)
+  tableType    TableType // SOURCE / TARGET / CODEBOOK
+  
+  // Klíče a metadata
+  isPrimaryKey Boolean   @default(false) // Je to primární klíč?
+  isRequired   Boolean   @default(false) // Je povinný?
+  
+  // Vzorková data (10 náhodných hodnot) pro rychlý náhled
+  sampleValues Json?     // ["value1", "value2", ...]
+  
+  // Statistiky (vypočítané při importu)
+  rowCount     Int?      // Celkový počet řádků
+  uniqueCount  Int?      // Počet unikátních hodnot
+  nullCount    Int?      // Počet prázdných hodnot
+  
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  // Vztahy
+  project      Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  
+  // Vazba NA jiný sloupec (tento sloupec je cizí klíč)
+  linkedToColumn   Column?  @relation("ColumnLinks", fields: [linkedToColumnId], references: [id])
+  linkedToColumnId String?
+  
+  // Vazby Z jiných sloupců (tento sloupec je primární klíč pro jiné)
+  linkedFromColumns Column[] @relation("ColumnLinks")
+  
+  // Data tohoto sloupce
+  values       ColumnValue[]
+
+  @@unique([projectId, tableName, columnName])
+  @@map("columns")
+}
+
+// ============================================
+// COLUMN_VALUES - Data jednotlivých sloupců
+// ============================================
+// Ukládá obsah sloupce po řádcích
+// ============================================
+model ColumnValue {
+  id        String @id @default(cuid())
+  columnId  String
+  rowIndex  Int    // Číslo řádku (0-indexed, bez hlavičky)
+  value     String // Hodnota jako text
+  
+  column    Column @relation(fields: [columnId], references: [id], onDelete: Cascade)
+
+  @@unique([columnId, rowIndex])
+  @@index([columnId])
+  @@index([value])
+  @@map("column_values")
+}
