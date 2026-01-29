@@ -517,13 +517,10 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
 // SERVE STATIC FRONTEND (Production)
 // ============================================
 if (process.env.NODE_ENV === 'production') {
-    const distPath = path.join(__dirname, '../dist');
+    const distPath = path.join(__dirname, '../../dist');
     app.use(express.static(distPath));
 
-    app.get([
-        '/',
-        '/:slug(.*)'
-    ], (req, res) => {
+    app.get(/.*/, (req, res) => {
         res.sendFile(path.join(distPath, 'index.html'));
     });
 }
