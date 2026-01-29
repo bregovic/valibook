@@ -158,8 +158,16 @@ function App() {
 
     setUploading(true);
     setUploadProgress(0);
-    const files = Array.from(e.target.files);
+    // Filter only valid Excel/CSV files
+    const files = Array.from(e.target.files).filter(f => f.name.match(/\.(xlsx|xls|csv)$/i));
     const totalFiles = files.length;
+
+    if (totalFiles === 0) {
+      alert('Nebyly nalezeny žádné podporované soubory (xlsx, xls, csv).');
+      setUploading(false);
+      e.target.value = '';
+      return;
+    }
 
     const uploadSingleFile = (file: File, index: number, total: number, allowOverwrite = false): Promise<void> => {
       return new Promise((resolve) => {
@@ -452,308 +460,325 @@ function App() {
                   </select>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                    <label className={`upload-btn ${uploading ? 'disabled' : ''}`} style={{ textAlign: 'center', position: 'relative', minWidth: '200px' }}>
-                      {uploading ? (
-                        <span style={{ fontSize: '0.85rem' }}>{statusText} <br /> ({uploadProgress}%)</span>
-                      ) : '📁 Nahrát Excel'}
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                      <div style={{ display: 'flex', gap: '10px' }}>
+                        <label className={`upload-btn ${uploading ? 'disabled' : ''}`} style={{ textAlign: 'center', position: 'relative', minWidth: '160px' }}>
+                          {uploading ? (
+                            <span style={{ fontSize: '0.85rem' }}>{statusText} <br /> ({uploadProgress}%)</span>
+                          ) : '📁 Soubory'}
+                          <input
+                            type="file"
+                            accept=".xlsx,.xls,.csv"
+                            multiple
+                            onChange={handleFileUpload}
+                            disabled={uploading}
+                          />
+                        </label>
+
+                        <label className={`upload-btn ${uploading ? 'disabled' : ''}`} style={{ textAlign: 'center', position: 'relative', minWidth: '160px' }}>
+                          {uploading ? '...' : '📂 Složka'}
+                          <input
+                            type="file"
+                            // @ts-ignore
+                            webkitdirectory=""
+                            // @ts-ignore
+                            directory=""
+                            multiple
+                            onChange={handleFileUpload}
+                            disabled={uploading}
+                          />
+                        </label>
+                      </div>
+                      {uploading && (
+                        <div style={{ width: '100%', height: '4px', background: '#e5e7eb', borderRadius: '2px', overflow: 'hidden' }}>
+                          <div style={{ width: `${uploadProgress}%`, height: '100%', background: '#3b82f6', transition: 'width 0.2s ease-out' }}></div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: '1rem' }}>
                       <input
-                        type="file"
-                        accept=".xlsx,.xls,.csv"
-                        multiple
-                        onChange={handleFileUpload}
-                        disabled={uploading}
+                        type="checkbox"
+                        id="hideEmpty"
+                        checked={hideEmptyColumns}
+                        onChange={(e) => setHideEmptyColumns(e.target.checked)}
                       />
-                    </label>
-                    {uploading && (
-                      <div style={{ width: '100%', height: '4px', background: '#e5e7eb', borderRadius: '2px', overflow: 'hidden' }}>
-                        <div style={{ width: `${uploadProgress}%`, height: '100%', background: '#3b82f6', transition: 'width 0.2s ease-out' }}></div>
+                      <label htmlFor="hideEmpty" style={{ fontSize: '0.9rem', cursor: 'pointer', userSelect: 'none' }}>
+                        Skrýt prázdné
+                      </label>
+                    </div>
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <input
+                        type="checkbox"
+                        id="showLinked"
+                        checked={showLinkedOnly}
+                        onChange={(e) => setShowLinkedOnly(e.target.checked)}
+                      />
+                      <label htmlFor="showLinked" style={{ fontSize: '0.9rem', cursor: 'pointer', userSelect: 'none' }}>
+                        Jen s vazbou
+                      </label>
+                    </div>
+
+                    {tables.length > 0 && (
+                      <>
+                        <button
+                          className="detect-btn"
+                          onClick={detectLinks}
+                          disabled={detecting}
+                        >
+                          {detecting ? '🔍 Hledám...' : '🔍 Najít vazby'}
+                        </button>
+                        <button
+                          className="validate-btn"
+                          onClick={validateProject}
+                          disabled={validating}
+                        >
+                          {validating ? '⏳ Validuji...' : '✓ Validovat'}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* Validation Results */}
+                {validationResult && (
+                  <div className={`validation-panel ${validationResult.summary.failed > 0 ? 'has-errors' : 'all-passed'}`}>
+                    <div className="validation-header">
+                      <h3>
+                        {validationResult.summary.failed > 0 ? '❌ Nalezeny chyby' : '✅ Validace úspěšná'}
+                      </h3>
+                      <div className="validation-summary">
+                        <span className="check-count">Kontrol: {validationResult.summary.totalChecks}</span>
+                        <span className="passed-count">✓ {validationResult.summary.passed}</span>
+                        <span className="failed-count">✗ {validationResult.summary.failed}</span>
+                      </div>
+                      <button className="close-btn" onClick={() => setValidationResult(null)}>×</button>
+                    </div>
+
+                    {validationResult.protocol && (
+                      <pre className="validation-protocol">
+                        {validationResult.protocol}
+                      </pre>
+                    )}
+
+                    {validationResult.errors.length > 0 && (
+                      <div className="validation-errors">
+                        {validationResult.errors.map((err, i) => (
+                          <div key={i} className="error-item">
+                            <div className="error-header">
+                              <strong>{err.fkTable}.{err.fkColumn}</strong>
+                              <span className="arrow">→</span>
+                              <strong>{err.pkTable}.{err.pkColumn}</strong>
+                              <span className="error-count">{err.missingCount} chybějících hodnot</span>
+                            </div>
+                            <div className="missing-values">
+                              Chybí: {err.missingValues.join(', ')}
+                              {err.missingCount > 10 && ` ... a dalších ${err.missingCount - 10}`}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Reconciliation Errors */}
+                    {validationResult.reconciliation && validationResult.reconciliation.length > 0 && (
+                      <div className="validation-errors" style={{ marginTop: '1rem' }}>
+                        <h4 style={{ margin: '0 0 0.5rem 0', color: '#d97706' }}>⚠️ Neshody v datech (Reconciliation)</h4>
+                        {validationResult.reconciliation.map((err, i) => (
+                          <div key={i} className="error-item warning">
+                            <div className="error-header">
+                              <strong>{err.sourceTable}.{err.sourceColumn}</strong>
+                              <span className="arrow">≠</span>
+                              <strong>{err.targetTable}.{err.targetColumn}</strong>
+                              <span className="error-count" style={{ background: '#fef3c7', color: '#d97706', borderColor: '#fcd34d' }}>{err.count} neshod</span>
+                            </div>
+                            <div className="missing-values">
+                              <div style={{ marginBottom: '0.5rem', fontWeight: 600, fontSize: '0.75rem' }}>Spojeno přes klíč: {err.joinKey}</div>
+                              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                                {err.mismatches.map((m, j) => (
+                                  <li key={j} style={{ borderBottom: '1px solid #eee', padding: '2px 0' }}>
+                                    <span style={{ color: '#6b7280' }}>[{m.key}]</span>: <span style={{ color: '#ef4444' }}>"{m.source}"</span> vs <span style={{ color: '#10b981' }}>"{m.target}"</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     )}
                   </div>
+                )}
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: '1rem' }}>
-                    <input
-                      type="checkbox"
-                      id="hideEmpty"
-                      checked={hideEmptyColumns}
-                      onChange={(e) => setHideEmptyColumns(e.target.checked)}
-                    />
-                    <label htmlFor="hideEmpty" style={{ fontSize: '0.9rem', cursor: 'pointer', userSelect: 'none' }}>
-                      Skrýt prázdné
-                    </label>
-                  </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <input
-                      type="checkbox"
-                      id="showLinked"
-                      checked={showLinkedOnly}
-                      onChange={(e) => setShowLinkedOnly(e.target.checked)}
-                    />
-                    <label htmlFor="showLinked" style={{ fontSize: '0.9rem', cursor: 'pointer', userSelect: 'none' }}>
-                      Jen s vazbou
-                    </label>
-                  </div>
-
-                  {tables.length > 0 && (
-                    <>
-                      <button
-                        className="detect-btn"
-                        onClick={detectLinks}
-                        disabled={detecting}
-                      >
-                        {detecting ? '🔍 Hledám...' : '🔍 Najít vazby'}
-                      </button>
-                      <button
-                        className="validate-btn"
-                        onClick={validateProject}
-                        disabled={validating}
-                      >
-                        {validating ? '⏳ Validuji...' : '✓ Validovat'}
-                      </button>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {/* Validation Results */}
-              {validationResult && (
-                <div className={`validation-panel ${validationResult.summary.failed > 0 ? 'has-errors' : 'all-passed'}`}>
-                  <div className="validation-header">
-                    <h3>
-                      {validationResult.summary.failed > 0 ? '❌ Nalezeny chyby' : '✅ Validace úspěšná'}
-                    </h3>
-                    <div className="validation-summary">
-                      <span className="check-count">Kontrol: {validationResult.summary.totalChecks}</span>
-                      <span className="passed-count">✓ {validationResult.summary.passed}</span>
-                      <span className="failed-count">✗ {validationResult.summary.failed}</span>
-                    </div>
-                    <button className="close-btn" onClick={() => setValidationResult(null)}>×</button>
-                  </div>
-
-                  {validationResult.protocol && (
-                    <pre className="validation-protocol">
-                      {validationResult.protocol}
-                    </pre>
-                  )}
-
-                  {validationResult.errors.length > 0 && (
-                    <div className="validation-errors">
-                      {validationResult.errors.map((err, i) => (
-                        <div key={i} className="error-item">
-                          <div className="error-header">
-                            <strong>{err.fkTable}.{err.fkColumn}</strong>
-                            <span className="arrow">→</span>
-                            <strong>{err.pkTable}.{err.pkColumn}</strong>
-                            <span className="error-count">{err.missingCount} chybějících hodnot</span>
-                          </div>
-                          <div className="missing-values">
-                            Chybí: {err.missingValues.join(', ')}
-                            {err.missingCount > 10 && ` ... a dalších ${err.missingCount - 10}`}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-
-                  {/* Reconciliation Errors */}
-                  {validationResult.reconciliation && validationResult.reconciliation.length > 0 && (
-                    <div className="validation-errors" style={{ marginTop: '1rem' }}>
-                      <h4 style={{ margin: '0 0 0.5rem 0', color: '#d97706' }}>⚠️ Neshody v datech (Reconciliation)</h4>
-                      {validationResult.reconciliation.map((err, i) => (
-                        <div key={i} className="error-item warning">
-                          <div className="error-header">
-                            <strong>{err.sourceTable}.{err.sourceColumn}</strong>
-                            <span className="arrow">≠</span>
-                            <strong>{err.targetTable}.{err.targetColumn}</strong>
-                            <span className="error-count" style={{ background: '#fef3c7', color: '#d97706', borderColor: '#fcd34d' }}>{err.count} neshod</span>
-                          </div>
-                          <div className="missing-values">
-                            <div style={{ marginBottom: '0.5rem', fontWeight: 600, fontSize: '0.75rem' }}>Spojeno přes klíč: {err.joinKey}</div>
-                            <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                              {err.mismatches.map((m, j) => (
-                                <li key={j} style={{ borderBottom: '1px solid #eee', padding: '2px 0' }}>
-                                  <span style={{ color: '#6b7280' }}>[{m.key}]</span>: <span style={{ color: '#ef4444' }}>"{m.source}"</span> vs <span style={{ color: '#10b981' }}>"{m.target}"</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Link Suggestions */}
-              {linkSuggestions.length > 0 && (
-                <div className="suggestions-panel">
-                  <div className="suggestions-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-                    <h3 style={{ margin: 0 }}>🔗 Navrhované vazby</h3>
-                    <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
-                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem' }}>
-                        <input
-                          type="checkbox"
-                          checked={linkSuggestions.length > 0 && selectedSuggestionIds.size === linkSuggestions.length}
-                          onChange={toggleSelectAll}
-                        />
-                        Vybrat vše
-                      </label>
-                      {selectedSuggestionIds.size > 0 && (
-                        <button className="apply-btn" onClick={applySelectedSuggestions}>
-                          Použít vybrané ({selectedSuggestionIds.size})
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="suggestions-list">
-                    <table className="suggestions-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-                      <thead>
-                        <tr>
-                          <th style={{ width: '40px' }}>
-                            <input
-                              type="checkbox"
-                              checked={linkSuggestions.length > 0 && selectedSuggestionIds.size === linkSuggestions.length}
-                              onChange={toggleSelectAll}
-                            />
-                          </th>
-                          <th>Zdrojový sloupec</th>
-                          <th>Cílový sloupec</th>
-                          <th>Shoda</th>
-                          <th>Akce</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {linkSuggestions.filter(s => !tables.some(t => t.columns.some(c => c.id === s.sourceColumnId && c.linkedToColumnId === s.targetColumnId))).map((s, i) => (
-                          <tr key={i} className="suggestion-item">
-                            <td>
-                              <input
-                                type="checkbox"
-                                checked={selectedSuggestionIds.has(getSuggestionKey(s))}
-                                onChange={() => toggleSelection(s)}
-                              />
-                            </td>
-                            <td><strong>{s.sourceTable}</strong>.<br />{s.sourceColumn}</td>
-                            <td><strong>{s.targetTable}</strong>.<br />{s.targetColumn}</td>
-                            <td>
-                              <span className="match-badge">{s.matchPercentage}%</span>
-                              <div style={{ fontSize: '0.75rem', color: '#666' }}>({s.commonValues} shod)</div>
-                            </td>
-                            <td>
-                              <button className="apply-btn" onClick={() => applyLink(s)}>
-                                ✓ Použít
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-              {tables.length === 0 ? (
-                <div className="empty-state">
-                  <p>Žádné tabulky. Nahrajte Excel soubor.</p>
-                </div>
-              ) : (
-                <div className="tables-grid">
-                  {tables.map(table => (
-                    <div key={table.tableName} className={`table-card ${table.tableType.toLowerCase()}`}>
-                      <div className="table-header">
-                        <span className="table-type-badge">
-                          {table.tableType === 'SOURCE' && '📗 Zdroj'}
-                          {table.tableType === 'TARGET' && '📕 Kontrola'}
-                        </span>
-                        <h3>{table.tableName}</h3>
-                        <span className="row-count">{table.rowCount} řádků</span>
+                {/* Link Suggestions */}
+                {linkSuggestions.length > 0 && (
+                  <div className="suggestions-panel">
+                    <div className="suggestions-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                      <h3 style={{ margin: 0 }}>🔗 Navrhované vazby</h3>
+                      <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem' }}>
+                          <input
+                            type="checkbox"
+                            checked={linkSuggestions.length > 0 && selectedSuggestionIds.size === linkSuggestions.length}
+                            onChange={toggleSelectAll}
+                          />
+                          Vybrat vše
+                        </label>
+                        {selectedSuggestionIds.size > 0 && (
+                          <button className="apply-btn" onClick={applySelectedSuggestions}>
+                            Použít vybrané ({selectedSuggestionIds.size})
+                          </button>
+                        )}
                       </div>
+                    </div>
 
-                      <table className="columns-table">
+                    <div className="suggestions-list">
+                      <table className="suggestions-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
                         <thead>
                           <tr>
-                            <th>Sloupec</th>
-                            <th>PK</th>
-                            <th>Unikát</th>
-                            <th>Prázdné</th>
-                            <th>Vzorky</th>
-                            <th>Vazba →</th>
+                            <th style={{ width: '40px' }}>
+                              <input
+                                type="checkbox"
+                                checked={linkSuggestions.length > 0 && selectedSuggestionIds.size === linkSuggestions.length}
+                                onChange={toggleSelectAll}
+                              />
+                            </th>
+                            <th>Zdrojový sloupec</th>
+                            <th>Cílový sloupec</th>
+                            <th>Shoda</th>
+                            <th>Akce</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {table.columns
-                            .filter(col => (!hideEmptyColumns || (col.uniqueCount ?? 0) > 0) && (!showLinkedOnly || col.linkedToColumnId))
-                            .map(col => (
-                              <tr key={col.id}>
-                                <td className="col-name">{col.columnName}</td>
-                                <td>
-                                  <button
-                                    className={`pk-btn ${col.isPrimaryKey ? 'active' : ''}`}
-                                    onClick={() => togglePrimaryKey(col.id, col.isPrimaryKey)}
-                                    title="Primární klíč"
-                                  >
-                                    🔑
-                                  </button>
-                                </td>
-                                <td className="stat">{col.uniqueCount}</td>
-                                <td className="stat">{col.nullCount}</td>
-                                <td className="samples">
-                                  {col.sampleValues?.slice(0, 3).join(', ')}
-                                  {(col.sampleValues?.length || 0) > 3 && '...'}
-                                </td>
-                                <td>
-                                  <select
-                                    value={col.linkedToColumnId || ''}
-                                    onChange={(e) => setColumnLink(col.id, e.target.value || null)}
-                                    style={{
-                                      border: (linkSuggestions.some(s => s.sourceColumnId === col.id) && !col.linkedToColumnId) ? '2px solid #3b82f6' : '1px solid #e2e8f0'
-                                    }}
-                                  >
-                                    <option value="">—</option>
-                                    {(() => {
-                                      const relevantSuggestions = linkSuggestions.filter(s => s.sourceColumnId === col.id);
-                                      const suggestedTargets = new Set(relevantSuggestions.map(s => s.targetColumnId));
-                                      const allPks = getPrimaryKeyColumns().filter(pk => pk.id !== col.id);
-
-                                      const suggested = allPks.filter(pk => suggestedTargets.has(pk.id));
-                                      const others = allPks.filter(pk => !suggestedTargets.has(pk.id));
-
-                                      return (
-                                        <>
-                                          {suggested.length > 0 && (
-                                            <optgroup label="✨ Doporučené">
-                                              {suggested.map(pk => {
-                                                const score = relevantSuggestions.find(s => s.targetColumnId === pk.id)?.matchPercentage;
-                                                return (
-                                                  <option key={pk.id} value={pk.id}>
-                                                    {pk.label} ({score}%)
-                                                  </option>
-                                                );
-                                              })}
-                                            </optgroup>
-                                          )}
-                                          <optgroup label="Ostatní">
-                                            {others.map(pk => (
-                                              <option key={pk.id} value={pk.id}>{pk.label}</option>
-                                            ))}
-                                          </optgroup>
-                                        </>
-                                      );
-                                    })()}
-                                  </select>
-                                </td>
-                              </tr>
-                            ))}
+                          {linkSuggestions.filter(s => !tables.some(t => t.columns.some(c => c.id === s.sourceColumnId && c.linkedToColumnId === s.targetColumnId))).map((s, i) => (
+                            <tr key={i} className="suggestion-item">
+                              <td>
+                                <input
+                                  type="checkbox"
+                                  checked={selectedSuggestionIds.has(getSuggestionKey(s))}
+                                  onChange={() => toggleSelection(s)}
+                                />
+                              </td>
+                              <td><strong>{s.sourceTable}</strong>.<br />{s.sourceColumn}</td>
+                              <td><strong>{s.targetTable}</strong>.<br />{s.targetColumn}</td>
+                              <td>
+                                <span className="match-badge">{s.matchPercentage}%</span>
+                                <div style={{ fontSize: '0.75rem', color: '#666' }}>({s.commonValues} shod)</div>
+                              </td>
+                              <td>
+                                <button className="apply-btn" onClick={() => applyLink(s)}>
+                                  ✓ Použít
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
                         </tbody>
                       </table>
                     </div>
-                  ))}
-                </div>
-              )}
-            </>
+                  </div>
+                )}
+
+                {tables.length === 0 ? (
+                  <div className="empty-state">
+                    <p>Žádné tabulky. Nahrajte Excel soubor.</p>
+                  </div>
+                ) : (
+                  <div className="tables-grid">
+                    {tables.map(table => (
+                      <div key={table.tableName} className={`table-card ${table.tableType.toLowerCase()}`}>
+                        <div className="table-header">
+                          <span className="table-type-badge">
+                            {table.tableType === 'SOURCE' && '📗 Zdroj'}
+                            {table.tableType === 'TARGET' && '📕 Kontrola'}
+                          </span>
+                          <h3>{table.tableName}</h3>
+                          <span className="row-count">{table.rowCount} řádků</span>
+                        </div>
+
+                        <table className="columns-table">
+                          <thead>
+                            <tr>
+                              <th>Sloupec</th>
+                              <th>PK</th>
+                              <th>Unikát</th>
+                              <th>Prázdné</th>
+                              <th>Vzorky</th>
+                              <th>Vazba →</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {table.columns
+                              .filter(col => (!hideEmptyColumns || (col.uniqueCount ?? 0) > 0) && (!showLinkedOnly || col.linkedToColumnId))
+                              .map(col => (
+                                <tr key={col.id}>
+                                  <td className="col-name">{col.columnName}</td>
+                                  <td>
+                                    <button
+                                      className={`pk-btn ${col.isPrimaryKey ? 'active' : ''}`}
+                                      onClick={() => togglePrimaryKey(col.id, col.isPrimaryKey)}
+                                      title="Primární klíč"
+                                    >
+                                      🔑
+                                    </button>
+                                  </td>
+                                  <td className="stat">{col.uniqueCount}</td>
+                                  <td className="stat">{col.nullCount}</td>
+                                  <td className="samples">
+                                    {col.sampleValues?.slice(0, 3).join(', ')}
+                                    {(col.sampleValues?.length || 0) > 3 && '...'}
+                                  </td>
+                                  <td>
+                                    <select
+                                      value={col.linkedToColumnId || ''}
+                                      onChange={(e) => setColumnLink(col.id, e.target.value || null)}
+                                      style={{
+                                        border: (linkSuggestions.some(s => s.sourceColumnId === col.id) && !col.linkedToColumnId) ? '2px solid #3b82f6' : '1px solid #e2e8f0'
+                                      }}
+                                    >
+                                      <option value="">—</option>
+                                      {(() => {
+                                        const relevantSuggestions = linkSuggestions.filter(s => s.sourceColumnId === col.id);
+                                        const suggestedTargets = new Set(relevantSuggestions.map(s => s.targetColumnId));
+                                        const allPks = getPrimaryKeyColumns().filter(pk => pk.id !== col.id);
+
+                                        const suggested = allPks.filter(pk => suggestedTargets.has(pk.id));
+                                        const others = allPks.filter(pk => !suggestedTargets.has(pk.id));
+
+                                        return (
+                                          <>
+                                            {suggested.length > 0 && (
+                                              <optgroup label="✨ Doporučené">
+                                                {suggested.map(pk => {
+                                                  const score = relevantSuggestions.find(s => s.targetColumnId === pk.id)?.matchPercentage;
+                                                  return (
+                                                    <option key={pk.id} value={pk.id}>
+                                                      {pk.label} ({score}%)
+                                                    </option>
+                                                  );
+                                                })}
+                                              </optgroup>
+                                            )}
+                                            <optgroup label="Ostatní">
+                                              {others.map(pk => (
+                                                <option key={pk.id} value={pk.id}>{pk.label}</option>
+                                              ))}
+                                            </optgroup>
+                                          </>
+                                        );
+                                      })()}
+                                    </select>
+                                  </td>
+                                </tr>
+                              ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </>
           )}
-        </main>
+            </main>
       </div>
     </div>
   );
