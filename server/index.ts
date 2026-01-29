@@ -108,9 +108,17 @@ app.get('/api/projects/:id', async (req, res) => {
 
 // Delete project
 app.delete('/api/projects/:id', async (req, res) => {
+    const { id } = req.params;
     try {
+        // 1. Unlink columns to prevent FK constraint errors (self-relation)
+        await prisma.column.updateMany({
+            where: { projectId: id },
+            data: { linkedToColumnId: null }
+        });
+
+        // 2. Delete project (Cascade takes care of columns and values)
         await prisma.project.delete({
-            where: { id: req.params.id }
+            where: { id }
         });
         res.json({ success: true });
     } catch (error) {
