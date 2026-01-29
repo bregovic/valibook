@@ -17,7 +17,7 @@ interface Column {
 
 interface TableData {
   tableName: string;
-  tableType: 'SOURCE' | 'TARGET' | 'CODEBOOK';
+  tableType: 'SOURCE' | 'TARGET';
   rowCount: number | null;
   columns: Column[];
 }
@@ -30,13 +30,26 @@ interface Project {
   _count?: { columns: number };
 }
 
+interface LinkSuggestion {
+  sourceColumnId: string;
+  sourceColumn: string;
+  sourceTable: string;
+  targetColumnId: string;
+  targetColumn: string;
+  targetTable: string;
+  matchPercentage: number;
+  commonValues: number;
+}
+
 function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
   const [tables, setTables] = useState<TableData[]>([]);
   const [newProjectName, setNewProjectName] = useState('');
   const [uploading, setUploading] = useState(false);
-  const [uploadType, setUploadType] = useState<'SOURCE' | 'TARGET' | 'CODEBOOK'>('SOURCE');
+  const [uploadType, setUploadType] = useState<'SOURCE' | 'TARGET'>('SOURCE');
+  const [linkSuggestions, setLinkSuggestions] = useState<LinkSuggestion[]>([]);
+  const [detecting, setDetecting] = useState(false);
 
   // Load projects
   const loadProjects = useCallback(async () => {
@@ -59,6 +72,7 @@ function App() {
   useEffect(() => {
     if (selectedProject) {
       loadTables(selectedProject.id);
+      setLinkSuggestions([]); // Clear suggestions when switching projects
     }
   }, [selectedProject, loadTables]);
 
@@ -77,34 +91,80 @@ function App() {
     setSelectedProject(project);
   };
 
-  // Upload file
+  // Upload files (supports multiple)
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (!e.target.files?.[0] || !selectedProject) return;
+    if (!e.target.files?.length || !selectedProject) return;
 
     setUploading(true);
-    const formData = new FormData();
-    formData.append('file', e.target.files[0]);
-    formData.append('tableType', uploadType);
+    const files = Array.from(e.target.files);
 
     try {
-      const res = await fetch(`${API_URL}/projects/${selectedProject.id}/upload`, {
-        method: 'POST',
-        body: formData
-      });
-      const result = await res.json();
+      for (const file of files) {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('tableType', uploadType);
 
-      if (result.success) {
-        loadTables(selectedProject.id);
-        loadProjects();
-      } else {
-        alert('Error: ' + result.error);
+        const res = await fetch(`${API_URL}/projects/${selectedProject.id}/upload`, {
+          method: 'POST',
+          body: formData
+        });
+        const result = await res.json();
+
+        if (!result.success) {
+          alert(`Error uploading ${file.name}: ${result.error}`);
+        }
       }
+
+      loadTables(selectedProject.id);
+      loadProjects();
     } catch (err) {
       alert('Upload failed: ' + (err as Error).message);
     } finally {
       setUploading(false);
       e.target.value = '';
     }
+  };
+
+  // Detect links automatically
+  const detectLinks = async () => {
+    if (!selectedProject) return;
+
+    setDetecting(true);
+    try {
+      const res = await fetch(`${API_URL}/projects/${selectedProject.id}/detect-links`, {
+        method: 'POST'
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        setLinkSuggestions(data.suggestions);
+      }
+    } catch (err) {
+      alert('Detection failed: ' + (err as Error).message);
+    } finally {
+      setDetecting(false);
+    }
+  };
+
+  // Apply link suggestion
+  const applyLink = async (suggestion: LinkSuggestion) => {
+    await fetch(`${API_URL}/columns/${suggestion.sourceColumnId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ linkedToColumnId: suggestion.targetColumnId })
+    });
+
+    // Mark target as primary key if not already
+    await fetch(`${API_URL}/columns/${suggestion.targetColumnId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isPrimaryKey: true })
+    });
+
+    if (selectedProject) loadTables(selectedProject.id);
+
+    // Remove applied suggestion
+    setLinkSuggestions(prev => prev.filter(s => s.sourceColumnId !== suggestion.sourceColumnId));
   };
 
   // Toggle primary key
@@ -193,7 +253,6 @@ function App() {
                   >
                     <option value="SOURCE">📗 Zdrojová tabulka</option>
                     <option value="TARGET">📕 Kontrolovaná tabulka</option>
-                    <option value="CODEBOOK">📘 Číselník</option>
                   </select>
 
                   <label className="upload-btn">
@@ -201,12 +260,45 @@ function App() {
                     <input
                       type="file"
                       accept=".xlsx,.xls,.csv"
+                      multiple
                       onChange={handleFileUpload}
                       disabled={uploading}
                     />
                   </label>
+
+                  {tables.length > 0 && (
+                    <button
+                      className="detect-btn"
+                      onClick={detectLinks}
+                      disabled={detecting}
+                    >
+                      {detecting ? '🔍 Hledám...' : '🔍 Najít vazby'}
+                    </button>
+                  )}
                 </div>
               </div>
+
+              {/* Link Suggestions */}
+              {linkSuggestions.length > 0 && (
+                <div className="suggestions-panel">
+                  <h3>🔗 Navrhované vazby</h3>
+                  <div className="suggestions-list">
+                    {linkSuggestions.map((s, i) => (
+                      <div key={i} className="suggestion-item">
+                        <span className="suggestion-text">
+                          <strong>{s.sourceTable}.{s.sourceColumn}</strong>
+                          <span className="arrow">→</span>
+                          <strong>{s.targetTable}.{s.targetColumn}</strong>
+                        </span>
+                        <span className="match-badge">{s.matchPercentage}% shoda</span>
+                        <button className="apply-btn" onClick={() => applyLink(s)}>
+                          ✓ Použít
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {tables.length === 0 ? (
                 <div className="empty-state">
@@ -220,7 +312,6 @@ function App() {
                         <span className="table-type-badge">
                           {table.tableType === 'SOURCE' && '📗 Zdroj'}
                           {table.tableType === 'TARGET' && '📕 Kontrola'}
-                          {table.tableType === 'CODEBOOK' && '📘 Číselník'}
                         </span>
                         <h3>{table.tableName}</h3>
                         <span className="row-count">{table.rowCount} řádků</span>

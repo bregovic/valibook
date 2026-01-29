@@ -3,7 +3,7 @@ import cors from 'cors';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
-import * as XLSX from 'xlsx';
+import XLSX from 'xlsx';
 import fs from 'fs';
 import prisma from './database.js';
 
@@ -320,6 +320,102 @@ app.get('/api/projects/:projectId/tables', async (req, res) => {
         }
 
         res.json(Object.values(tables));
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: (error as Error).message });
+    }
+});
+
+// ============================================
+// AUTO-DETECT LINKS - Find columns with overlapping values
+// ============================================
+app.post('/api/projects/:projectId/detect-links', async (req, res) => {
+    const { projectId } = req.params;
+
+    try {
+        // Get all columns with their unique values
+        const columns = await prisma.column.findMany({
+            where: { projectId },
+            select: {
+                id: true,
+                tableName: true,
+                columnName: true,
+                tableType: true,
+                isPrimaryKey: true,
+                uniqueCount: true,
+                rowCount: true
+            }
+        });
+
+        // Get unique values for each column (using column_values table)
+        const columnValuesMap = new Map<string, Set<string>>();
+
+        for (const col of columns) {
+            const values = await prisma.columnValue.findMany({
+                where: { columnId: col.id },
+                select: { value: true },
+                distinct: ['value']
+            });
+            columnValuesMap.set(col.id, new Set(values.map(v => v.value).filter(v => v !== '')));
+        }
+
+        // Find potential links (column A values are subset of column B values)
+        const suggestions: Array<{
+            sourceColumnId: string;
+            sourceColumn: string;
+            sourceTable: string;
+            targetColumnId: string;
+            targetColumn: string;
+            targetTable: string;
+            matchPercentage: number;
+            commonValues: number;
+        }> = [];
+
+        for (const colA of columns) {
+            const valuesA = columnValuesMap.get(colA.id);
+            if (!valuesA || valuesA.size === 0) continue;
+
+            for (const colB of columns) {
+                if (colA.id === colB.id) continue;
+                if (colA.tableName === colB.tableName) continue; // Same table
+
+                const valuesB = columnValuesMap.get(colB.id);
+                if (!valuesB || valuesB.size === 0) continue;
+
+                // Count how many values from A exist in B
+                let commonCount = 0;
+                for (const val of valuesA) {
+                    if (valuesB.has(val)) commonCount++;
+                }
+
+                if (commonCount > 0) {
+                    const matchPercentage = Math.round((commonCount / valuesA.size) * 100);
+
+                    // Only suggest if significant overlap (>50%)
+                    if (matchPercentage >= 50) {
+                        suggestions.push({
+                            sourceColumnId: colA.id,
+                            sourceColumn: colA.columnName,
+                            sourceTable: colA.tableName,
+                            targetColumnId: colB.id,
+                            targetColumn: colB.columnName,
+                            targetTable: colB.tableName,
+                            matchPercentage,
+                            commonValues: commonCount
+                        });
+                    }
+                }
+            }
+        }
+
+        // Sort by match percentage (highest first)
+        suggestions.sort((a, b) => b.matchPercentage - a.matchPercentage);
+
+        res.json({
+            success: true,
+            suggestions: suggestions.slice(0, 20) // Limit to top 20
+        });
+
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: (error as Error).message });

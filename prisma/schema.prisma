@@ -33,7 +33,6 @@ model Project {
 enum TableType {
   SOURCE   // Zdrojová tabulka (očekávaný stav)
   TARGET   // Kontrolovaná tabulka (testovaný)
-  CODEBOOK // Číselník
 }
 
 model Column {
