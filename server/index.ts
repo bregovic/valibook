@@ -14,7 +14,8 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
 // Multer setup for file uploads
 const UPLOADS_DIR = process.env.UPLOADS_DIR || 'uploads/';
@@ -31,7 +32,10 @@ const storage = multer.diskStorage({
         cb(null, uniqueSuffix + '-' + file.originalname);
     }
 });
-const upload = multer({ storage: storage });
+const upload = multer({
+    storage: storage,
+    limits: { fileSize: 50 * 1024 * 1024 } // 50MB limit
+});
 
 // ============================================
 // PROJECTS API
@@ -546,7 +550,10 @@ if (fs.existsSync(distPath)) {
 // ============================================
 // START SERVER
 // ============================================
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
     console.log(`🚀 Valibook server running on http://localhost:${PORT}`);
     console.log(`📊 Database: PostgreSQL on Railway`);
 });
+
+// Set timeout to 5 minutes to allow large file processing
+server.setTimeout(300000);
