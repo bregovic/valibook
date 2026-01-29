@@ -649,7 +649,7 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
         protocol += `Datum: ${timestamp}\n`;
         protocol += `Stav: ${status}\n`;
         protocol += `----------------------------------------\n`;
-        protocol += `Celkem kontrol: ${fkColumns.length + reconciliationErrors.length}\n`;
+        protocol += `Celkem kontrol: ${allChecks.length}\n`;
         protocol += `Selhalo: ${totalFailed}\n\n`;
 
         if (integrityErrors.length > 0) {
