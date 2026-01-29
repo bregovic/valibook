@@ -79,6 +79,7 @@ function App() {
   const [newProjectName, setNewProjectName] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
+  const [statusText, setStatusText] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [hideEmptyColumns, setHideEmptyColumns] = useState(false);
   const [uploadType, setUploadType] = useState<'SOURCE' | 'TARGET' | 'FORBIDDEN' | 'RANGE'>('SOURCE');
@@ -157,8 +158,9 @@ function App() {
     setUploading(true);
     setUploadProgress(0);
     const files = Array.from(e.target.files);
+    const totalFiles = files.length;
 
-    const uploadSingleFile = (file: File, allowOverwrite = false): Promise<void> => {
+    const uploadSingleFile = (file: File, index: number, total: number, allowOverwrite = false): Promise<void> => {
       return new Promise((resolve) => {
         const formData = new FormData();
         formData.append('file', file);
@@ -173,6 +175,11 @@ function App() {
           if (event.lengthComputable) {
             const percent = Math.round((event.loaded / event.total) * 100);
             setUploadProgress(percent);
+            if (percent < 100) {
+              setStatusText(`Nahrávám ${index}/${total}: ${file.name}`);
+            } else {
+              setStatusText(`Zpracovávám ${index}/${total}: ${file.name}...`);
+            }
           }
         };
 
@@ -181,7 +188,7 @@ function App() {
             try {
               const data = JSON.parse(xhr.responseText);
               if (confirm(`Tabulka '${data.tableName}' již existuje. Chcete ji přepsat? Stará data budou smazána.`)) {
-                resolve(uploadSingleFile(file, true));
+                resolve(uploadSingleFile(file, index, total, true));
               } else {
                 resolve();
               }
@@ -212,14 +219,18 @@ function App() {
     };
 
     try {
-      for (const file of files) {
-        await uploadSingleFile(file);
+      for (let i = 0; i < totalFiles; i++) {
+        const file = files[i];
+        setStatusText(`Nahrávám ${i + 1}/${totalFiles}: ${file.name}`);
+        setUploadProgress(0);
+        await uploadSingleFile(file, i + 1, totalFiles);
       }
       await loadTables(selectedProject.id);
       loadProjects();
     } finally {
       setUploading(false);
       setUploadProgress(0);
+      setStatusText('');
       e.target.value = '';
     }
   };
@@ -440,8 +451,10 @@ function App() {
                   </select>
 
                   <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
-                    <label className={`upload-btn ${uploading ? 'disabled' : ''}`} style={{ textAlign: 'center', position: 'relative' }}>
-                      {uploading ? `Nahrávám... ${uploadProgress}%` : '📁 Nahrát Excel'}
+                    <label className={`upload-btn ${uploading ? 'disabled' : ''}`} style={{ textAlign: 'center', position: 'relative', minWidth: '200px' }}>
+                      {uploading ? (
+                        <span style={{ fontSize: '0.85rem' }}>{statusText} <br /> ({uploadProgress}%)</span>
+                      ) : '📁 Nahrát Excel'}
                       <input
                         type="file"
                         accept=".xlsx,.xls,.csv"
