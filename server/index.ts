@@ -484,19 +484,10 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
             }
         });
 
-        if (fkColumns.length === 0) {
-            return res.json({
-                success: true,
-                message: 'No linked columns to validate',
-                errors: [],
-                reconciliation: [],
-                summary: { totalChecks: 0, passed: 0, failed: 0 }
-            });
-        }
-
         // 1. INTEGRITY CHECKS (Orphans) - SQL Optimized
         const integrityErrors = [];
         const reconciliationErrors = [];
+        const forbiddenErrors: any[] = [];
         const allChecks: Array<{ type: string; label: string; status: 'OK' | 'ERROR'; checked: number; failed: number; }> = [];
 
         for (const fkCol of fkColumns) {
@@ -660,8 +651,75 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
             }
         }
 
+        // 3. FORBIDDEN VALUES CHECK
+        const forbiddenColumns = await prisma.column.findMany({
+            where: { projectId, tableType: 'FORBIDDEN' }
+        });
+
+        if (forbiddenColumns.length > 0) {
+            // Find target columns with same name in SOURCE/TARGET tables
+            const candidateColumns = await prisma.column.findMany({
+                where: {
+                    projectId,
+                    tableType: { in: ['SOURCE', 'TARGET'] }
+                }
+            });
+
+            for (const fCol of forbiddenColumns) {
+                // Determine Matching Columns (Case Insensitive)
+                const targets = candidateColumns.filter(c => c.columnName.toLowerCase() === fCol.columnName.toLowerCase());
+
+                for (const tCol of targets) {
+                    // Check intersection
+                    const intersection = await prisma.$queryRaw<Array<{ value: string }>>`
+                        SELECT v1.value 
+                        FROM "column_values" v1
+                        JOIN "column_values" v2 ON v1.value = v2.value
+                        WHERE v1."columnId" = ${tCol.id}
+                          AND v2."columnId" = ${fCol.id}
+                        LIMIT 11
+                     `;
+
+                    if (intersection.length > 0) {
+                        const countRes = await prisma.$queryRaw<Array<{ count: bigint }>>`
+                            SELECT COUNT(*) as count
+                            FROM "column_values" v1
+                            JOIN "column_values" v2 ON v1.value = v2.value
+                            WHERE v1."columnId" = ${tCol.id}
+                              AND v2."columnId" = ${fCol.id}
+                        `;
+                        const failedCount = Number(countRes[0].count);
+
+                        forbiddenErrors.push({
+                            forbiddenTable: fCol.tableName,
+                            targetTable: tCol.tableName,
+                            column: tCol.columnName,
+                            foundValues: intersection.slice(0, 10).map(v => v.value),
+                            count: failedCount
+                        });
+
+                        allChecks.push({
+                            type: 'ZAKÁZANÉ',
+                            label: `${tCol.tableName}.${tCol.columnName} (vs ${fCol.tableName})`,
+                            status: 'ERROR',
+                            checked: 0,
+                            failed: failedCount
+                        });
+                    } else {
+                        allChecks.push({
+                            type: 'ZAKÁZANÉ',
+                            label: `${tCol.tableName}.${tCol.columnName} (vs ${fCol.tableName})`,
+                            status: 'OK',
+                            checked: 0,
+                            failed: 0
+                        });
+                    }
+                }
+            }
+        }
+
         // Generate Protocol
-        const totalFailed = integrityErrors.length + reconciliationErrors.length;
+        const totalFailed = integrityErrors.length + reconciliationErrors.length + forbiddenErrors.length;
         const totalPassed = allChecks.filter(c => c.status === 'OK').length;
         const status = totalFailed === 0 ? 'ÚSPĚŠNÉ' : 'S CHYBAMI';
         const timestamp = new Date().toLocaleString('cs-CZ');
@@ -673,6 +731,14 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
         protocol += `----------------------------------------\n`;
         protocol += `Celkem kontrol: ${allChecks.length}\n`;
         protocol += `Selhalo: ${totalFailed}\n\n`;
+
+        if (forbiddenErrors.length > 0) {
+            protocol += `[ZAKÁZANÉ HODNOTY]\n`;
+            forbiddenErrors.forEach(e => {
+                protocol += `- ${e.targetTable}.${e.column} obsahuje ${e.count} zakázaných hodnot (dle ${e.forbiddenTable}): ${e.foundValues.join(', ')}...\n`;
+            });
+            protocol += `\n`;
+        }
 
         if (integrityErrors.length > 0) {
             protocol += `[INTEGRITA - SIROTCI]\n`;
@@ -691,16 +757,17 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
         }
 
         if (totalFailed === 0) {
-            protocol += `Všechna data jsou konzistentní. Integrita i hodnoty odpovídají.\n`;
+            protocol += `Všechna data jsou konzistentní. Integrita, hodnoty i zakázané položky jsou v pořádku.\n`;
         }
 
         res.json({
             success: true,
             errors: integrityErrors,
             reconciliation: reconciliationErrors,
+            forbidden: forbiddenErrors,
             protocol,
             summary: {
-                totalChecks: fkColumns.length,
+                totalChecks: allChecks.length,
                 passed: totalPassed,
                 failed: totalFailed
             }

@@ -83,7 +83,7 @@ function App() {
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [hideEmptyColumns, setHideEmptyColumns] = useState(false);
   const [showLinkedOnly, setShowLinkedOnly] = useState(false);
-  const [uploadType, setUploadType] = useState<'SOURCE' | 'TARGET' | 'FORBIDDEN' | 'RANGE'>('SOURCE');
+  const [uploadType, setUploadType] = useState<'SOURCE' | 'TARGET' | 'FORBIDDEN' | 'RANGE'>('TARGET');
   const [linkSuggestions, setLinkSuggestions] = useState<LinkSuggestion[]>([]);
   const [selectedSuggestionIds, setSelectedSuggestionIds] = useState<Set<string>>(new Set());
   const [detecting, setDetecting] = useState(false);
