@@ -516,13 +516,31 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
 // ============================================
 // SERVE STATIC FRONTEND (Production)
 // ============================================
-if (process.env.NODE_ENV === 'production') {
-    const distPath = path.join(__dirname, '../../dist');
+// ============================================
+// SERVE STATIC FRONTEND
+// ============================================
+const distPath = path.join(__dirname, '../../dist');
+const indexPath = path.join(distPath, 'index.html');
+
+console.log('📂 Static files path:', distPath);
+console.log('📄 Index file path:', indexPath);
+
+if (fs.existsSync(distPath)) {
+    console.log('✅ Dist folder found. Serving static files...');
     app.use(express.static(distPath));
 
-    app.get(/.*/, (req, res) => {
-        res.sendFile(path.join(distPath, 'index.html'));
+    // SPA Fallback - Catch all requests that didn't match an API route
+    app.use((req, res) => {
+        if (fs.existsSync(indexPath)) {
+            res.sendFile(indexPath);
+        } else {
+            console.error('❌ Index.html not found at:', indexPath);
+            res.status(404).send('Valibook Frontend not found (build missing?)');
+        }
     });
+} else {
+    console.warn('⚠️ Dist folder NOT found at:', distPath);
+    console.warn('Current directory:', __dirname);
 }
 
 // ============================================
