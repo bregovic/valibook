@@ -31,8 +31,10 @@ model Project {
 // Obsahuje: název tabulky, název sloupce, typ (source/target), vazby
 // ============================================
 enum TableType {
-  SOURCE   // Zdrojová tabulka (očekávaný stav)
-  TARGET   // Kontrolovaná tabulka (testovaný)
+  SOURCE    // Zdrojová tabulka (očekávaný stav)
+  TARGET    // Kontrolovaná tabulka (testovaný)
+  FORBIDDEN // Zakázané hodnoty
+  RANGE     // Rozsah hodnot (číselník)
 }
 
 model Column {

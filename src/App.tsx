@@ -17,7 +17,7 @@ interface Column {
 
 interface TableData {
   tableName: string;
-  tableType: 'SOURCE' | 'TARGET';
+  tableType: 'SOURCE' | 'TARGET' | 'FORBIDDEN' | 'RANGE';
   rowCount: number | null;
   columns: Column[];
 }
@@ -66,7 +66,7 @@ function App() {
   const [tables, setTables] = useState<TableData[]>([]);
   const [newProjectName, setNewProjectName] = useState('');
   const [uploading, setUploading] = useState(false);
-  const [uploadType, setUploadType] = useState<'SOURCE' | 'TARGET'>('SOURCE');
+  const [uploadType, setUploadType] = useState<'SOURCE' | 'TARGET' | 'FORBIDDEN' | 'RANGE'>('SOURCE');
   const [linkSuggestions, setLinkSuggestions] = useState<LinkSuggestion[]>([]);
   const [detecting, setDetecting] = useState(false);
   const [validating, setValidating] = useState(false);
@@ -110,6 +110,25 @@ function App() {
     setProjects([project, ...projects]);
     setNewProjectName('');
     setSelectedProject(project);
+  };
+
+  // Delete project
+  const deleteProject = async (e: React.MouseEvent, projectId: string) => {
+    e.stopPropagation();
+    if (!confirm('Opravdu chcete smazat tento projekt? Všechna data budou ztracena.')) return;
+
+    try {
+      const res = await fetch(`${API_URL}/projects/${projectId}`, { method: 'DELETE' });
+      if (res.ok) {
+        setProjects(prev => prev.filter(p => p.id !== projectId));
+        if (selectedProject?.id === projectId) {
+          setSelectedProject(null);
+          setTables([]);
+        }
+      }
+    } catch (err) {
+      alert('Failed to delete project');
+    }
   };
 
   // Upload files (supports multiple)
@@ -272,8 +291,19 @@ function App() {
                 className={selectedProject?.id === p.id ? 'active' : ''}
                 onClick={() => setSelectedProject(p)}
               >
-                <span className="project-name">{p.name}</span>
-                <span className="project-count">{p._count?.columns || 0} sloupců</span>
+                <div style={{ flex: 1 }}>
+                  <span className="project-name">{p.name}</span>
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  <span className="project-count">{p._count?.columns || 0}</span>
+                  <button
+                    className="delete-project-btn"
+                    onClick={(e) => deleteProject(e, p.id)}
+                    title="Smazat projekt"
+                  >
+                    🗑️
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
@@ -298,6 +328,8 @@ function App() {
                   >
                     <option value="SOURCE">📗 Zdrojová tabulka</option>
                     <option value="TARGET">📕 Kontrolovaná tabulka</option>
+                    <option value="FORBIDDEN">⛔ Zakázané hodnoty</option>
+                    <option value="RANGE">🔢 Rozsah hodnot</option>
                   </select>
 
                   <label className="upload-btn">
