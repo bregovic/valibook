@@ -734,3 +734,16 @@ tr:last-child td {
   background: #fee2e2;
   transform: scale(1.1);
 }
+
+.suggestion-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.suggestion-item input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  cursor: pointer;
+  accent-color: var(--accent-primary);
+}

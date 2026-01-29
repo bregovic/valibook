@@ -68,6 +68,7 @@ function App() {
   const [uploading, setUploading] = useState(false);
   const [uploadType, setUploadType] = useState<'SOURCE' | 'TARGET' | 'FORBIDDEN' | 'RANGE'>('SOURCE');
   const [linkSuggestions, setLinkSuggestions] = useState<LinkSuggestion[]>([]);
+  const [selectedSuggestionIds, setSelectedSuggestionIds] = useState<Set<string>>(new Set());
   const [detecting, setDetecting] = useState(false);
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
@@ -186,8 +187,39 @@ function App() {
     }
   };
 
+  // Helpers for selection
+  const getSuggestionKey = (s: LinkSuggestion) => `${s.sourceColumnId}-${s.targetColumnId}`;
+
+  const toggleSelection = (s: LinkSuggestion) => {
+    const key = getSuggestionKey(s);
+    const next = new Set(selectedSuggestionIds);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
+    setSelectedSuggestionIds(next);
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedSuggestionIds.size === linkSuggestions.length) {
+      setSelectedSuggestionIds(new Set());
+    } else {
+      setSelectedSuggestionIds(new Set(linkSuggestions.map(getSuggestionKey)));
+    }
+  };
+
+  const applySelectedSuggestions = async () => {
+    const toApply = linkSuggestions.filter(s => selectedSuggestionIds.has(getSuggestionKey(s)));
+    if (toApply.length === 0) return;
+
+    for (const s of toApply) {
+      await applyLink(s, true); // Skip reload for individual items
+    }
+
+    if (selectedProject) loadTables(selectedProject.id);
+    setSelectedSuggestionIds(new Set());
+  };
+
   // Apply link suggestion
-  const applyLink = async (suggestion: LinkSuggestion) => {
+  const applyLink = async (suggestion: LinkSuggestion, skipReload = false) => {
     await fetch(`${API_URL}/columns/${suggestion.sourceColumnId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -201,7 +233,7 @@ function App() {
       body: JSON.stringify({ isPrimaryKey: true })
     });
 
-    if (selectedProject) loadTables(selectedProject.id);
+    if (!skipReload && selectedProject) loadTables(selectedProject.id);
 
     // Remove applied suggestion
     setLinkSuggestions(prev => prev.filter(s => s.sourceColumnId !== suggestion.sourceColumnId));
@@ -403,19 +435,48 @@ function App() {
               {/* Link Suggestions */}
               {linkSuggestions.length > 0 && (
                 <div className="suggestions-panel">
-                  <h3>🔗 Navrhované vazby</h3>
+                  <div className="suggestions-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                    <h3 style={{ margin: 0 }}>🔗 Navrhované vazby</h3>
+                    <div style={{ display: 'flex', gap: '1rem', alignItems: 'center' }}>
+                      <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer', fontSize: '0.9rem' }}>
+                        <input
+                          type="checkbox"
+                          checked={linkSuggestions.length > 0 && selectedSuggestionIds.size === linkSuggestions.length}
+                          onChange={toggleSelectAll}
+                        />
+                        Vybrat vše
+                      </label>
+                      {selectedSuggestionIds.size > 0 && (
+                        <button className="apply-btn" onClick={applySelectedSuggestions}>
+                          Použít vybrané ({selectedSuggestionIds.size})
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
                   <div className="suggestions-list">
                     {linkSuggestions.map((s, i) => (
                       <div key={i} className="suggestion-item">
-                        <span className="suggestion-text">
-                          <strong>{s.sourceTable}.{s.sourceColumn}</strong>
-                          <span className="arrow">→</span>
-                          <strong>{s.targetTable}.{s.targetColumn}</strong>
-                        </span>
-                        <span className="match-badge">{s.matchPercentage}% shoda</span>
-                        <button className="apply-btn" onClick={() => applyLink(s)}>
-                          ✓ Použít
-                        </button>
+                        <div style={{ display: 'flex', alignItems: 'center' }}>
+                          <input
+                            type="checkbox"
+                            style={{ marginRight: '1rem', cursor: 'pointer' }}
+                            checked={selectedSuggestionIds.has(getSuggestionKey(s))}
+                            onChange={() => toggleSelection(s)}
+                          />
+                          <span className="suggestion-text">
+                            <strong>{s.sourceTable}.{s.sourceColumn}</strong>
+                            <span className="arrow">→</span>
+                            <strong>{s.targetTable}.{s.targetColumn}</strong>
+                          </span>
+                        </div>
+
+                        <div className="suggestion-actions">
+                          <span className="match-badge">{s.matchPercentage}% shoda</span>
+                          <button className="apply-btn" onClick={() => applyLink(s)}>
+                            ✓ Použít
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
