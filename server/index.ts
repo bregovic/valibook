@@ -244,6 +244,20 @@ app.post('/api/projects/:projectId/upload', upload.single('file'), async (req, r
 // ============================================
 
 // Update column (set primary key, required, etc.)
+app.get('/api/columns/:id', async (req, res) => {
+    try {
+        const column = await prisma.column.findUnique({
+            where: { id: req.params.id },
+            include: { linkedToColumn: true }
+        });
+        if (!column) return res.status(404).json({ error: 'Column not found' });
+        res.json(column);
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: (error as Error).message });
+    }
+});
+
 app.patch('/api/columns/:id', async (req, res) => {
     const { id } = req.params;
     const { isPrimaryKey, isRequired, linkedToColumnId } = req.body;
