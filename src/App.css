@@ -44,25 +44,42 @@ body {
 }
 
 /* Header */
+/* Header */
 .header {
   background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-card) 100%);
-  padding: 1.5rem 2rem;
+  padding: 1rem 2rem;
   border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.logo-section {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.app-logo {
+  height: 40px;
+  width: auto;
+  object-fit: contain;
 }
 
 .header h1 {
-  font-size: 1.75rem;
+  font-size: 1.5rem;
   font-weight: 700;
   background: linear-gradient(135deg, var(--accent-primary), var(--accent-codebook));
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
+  margin: 0;
 }
 
 .header p {
   color: var(--text-secondary);
   font-size: 0.875rem;
-  margin-top: 0.25rem;
+  margin: 0;
 }
 
 /* Main Layout */

@@ -242,7 +242,10 @@ function App() {
   return (
     <div className="app">
       <header className="header">
-        <h1>📊 Valibook</h1>
+        <div className="logo-section">
+          <img src="/logo.png" alt="Valibook" className="app-logo" />
+          <h1>Valibook</h1>
+        </div>
         <p>Excel Validation Tool</p>
       </header>
 
