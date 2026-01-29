@@ -41,6 +41,25 @@ interface LinkSuggestion {
   commonValues: number;
 }
 
+interface ValidationError {
+  fkTable: string;
+  fkColumn: string;
+  pkTable: string;
+  pkColumn: string;
+  missingValues: string[];
+  missingCount: number;
+  totalFkValues: number;
+}
+
+interface ValidationResult {
+  errors: ValidationError[];
+  summary: {
+    totalChecks: number;
+    passed: number;
+    failed: number;
+  };
+}
+
 function App() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<Project | null>(null);
@@ -50,6 +69,8 @@ function App() {
   const [uploadType, setUploadType] = useState<'SOURCE' | 'TARGET'>('SOURCE');
   const [linkSuggestions, setLinkSuggestions] = useState<LinkSuggestion[]>([]);
   const [detecting, setDetecting] = useState(false);
+  const [validating, setValidating] = useState(false);
+  const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
 
   // Load projects
   const loadProjects = useCallback(async () => {
@@ -197,6 +218,27 @@ function App() {
       }));
   };
 
+  // Validate FK integrity
+  const validateProject = async () => {
+    if (!selectedProject) return;
+
+    setValidating(true);
+    try {
+      const res = await fetch(`${API_URL}/projects/${selectedProject.id}/validate`, {
+        method: 'POST'
+      });
+      const data = await res.json();
+
+      if (data.success) {
+        setValidationResult(data);
+      }
+    } catch (err) {
+      alert('Validation failed: ' + (err as Error).message);
+    } finally {
+      setValidating(false);
+    }
+  };
+
   return (
     <div className="app">
       <header className="header">
@@ -267,16 +309,61 @@ function App() {
                   </label>
 
                   {tables.length > 0 && (
-                    <button
-                      className="detect-btn"
-                      onClick={detectLinks}
-                      disabled={detecting}
-                    >
-                      {detecting ? '🔍 Hledám...' : '🔍 Najít vazby'}
-                    </button>
+                    <>
+                      <button
+                        className="detect-btn"
+                        onClick={detectLinks}
+                        disabled={detecting}
+                      >
+                        {detecting ? '🔍 Hledám...' : '🔍 Najít vazby'}
+                      </button>
+                      <button
+                        className="validate-btn"
+                        onClick={validateProject}
+                        disabled={validating}
+                      >
+                        {validating ? '⏳ Validuji...' : '✓ Validovat'}
+                      </button>
+                    </>
                   )}
                 </div>
               </div>
+
+              {/* Validation Results */}
+              {validationResult && (
+                <div className={`validation-panel ${validationResult.summary.failed > 0 ? 'has-errors' : 'all-passed'}`}>
+                  <div className="validation-header">
+                    <h3>
+                      {validationResult.summary.failed > 0 ? '❌ Nalezeny chyby' : '✅ Validace úspěšná'}
+                    </h3>
+                    <div className="validation-summary">
+                      <span className="check-count">Kontrol: {validationResult.summary.totalChecks}</span>
+                      <span className="passed-count">✓ {validationResult.summary.passed}</span>
+                      <span className="failed-count">✗ {validationResult.summary.failed}</span>
+                    </div>
+                    <button className="close-btn" onClick={() => setValidationResult(null)}>×</button>
+                  </div>
+
+                  {validationResult.errors.length > 0 && (
+                    <div className="validation-errors">
+                      {validationResult.errors.map((err, i) => (
+                        <div key={i} className="error-item">
+                          <div className="error-header">
+                            <strong>{err.fkTable}.{err.fkColumn}</strong>
+                            <span className="arrow">→</span>
+                            <strong>{err.pkTable}.{err.pkColumn}</strong>
+                            <span className="error-count">{err.missingCount} chybějících hodnot</span>
+                          </div>
+                          <div className="missing-values">
+                            Chybí: {err.missingValues.join(', ')}
+                            {err.missingCount > 10 && ` ... a dalších ${err.missingCount - 10}`}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Link Suggestions */}
               {linkSuggestions.length > 0 && (

@@ -423,6 +423,97 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
 });
 
 // ============================================
+// VALIDATE PROJECT - Check FK integrity
+// ============================================
+app.post('/api/projects/:projectId/validate', async (req, res) => {
+    const { projectId } = req.params;
+
+    try {
+        // Get all columns with links (FK columns)
+        const fkColumns = await prisma.column.findMany({
+            where: {
+                projectId,
+                linkedToColumnId: { not: null }
+            },
+            include: {
+                linkedToColumn: true
+            }
+        });
+
+        if (fkColumns.length === 0) {
+            return res.json({
+                success: true,
+                message: 'No linked columns to validate',
+                errors: [],
+                summary: { totalChecks: 0, passed: 0, failed: 0 }
+            });
+        }
+
+        const validationErrors: Array<{
+            fkTable: string;
+            fkColumn: string;
+            pkTable: string;
+            pkColumn: string;
+            missingValues: string[];
+            missingCount: number;
+            totalFkValues: number;
+        }> = [];
+
+        for (const fkCol of fkColumns) {
+            if (!fkCol.linkedToColumn) continue;
+
+            // Get all FK values
+            const fkValues = await prisma.columnValue.findMany({
+                where: { columnId: fkCol.id },
+                select: { value: true }
+            });
+            const fkValuesSet = new Set(fkValues.map(v => v.value).filter(v => v !== ''));
+
+            // Get all PK values
+            const pkValues = await prisma.columnValue.findMany({
+                where: { columnId: fkCol.linkedToColumnId! },
+                select: { value: true }
+            });
+            const pkValuesSet = new Set(pkValues.map(v => v.value).filter(v => v !== ''));
+
+            // Find missing values (FK values that don't exist in PK)
+            const missingValues: string[] = [];
+            for (const val of fkValuesSet) {
+                if (!pkValuesSet.has(val)) {
+                    missingValues.push(val);
+                }
+            }
+
+            if (missingValues.length > 0) {
+                validationErrors.push({
+                    fkTable: fkCol.tableName,
+                    fkColumn: fkCol.columnName,
+                    pkTable: fkCol.linkedToColumn.tableName,
+                    pkColumn: fkCol.linkedToColumn.columnName,
+                    missingValues: missingValues.slice(0, 10), // Limit to first 10
+                    missingCount: missingValues.length,
+                    totalFkValues: fkValuesSet.size
+                });
+            }
+        }
+
+        res.json({
+            success: true,
+            errors: validationErrors,
+            summary: {
+                totalChecks: fkColumns.length,
+                passed: fkColumns.length - validationErrors.length,
+                failed: validationErrors.length
+            }
+        });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: (error as Error).message });
+    }
+});
+
+// ============================================
 // SERVE STATIC FRONTEND (Production)
 // ============================================
 if (process.env.NODE_ENV === 'production') {
