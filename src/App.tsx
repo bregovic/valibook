@@ -78,6 +78,7 @@ function App() {
   const [tables, setTables] = useState<TableData[]>([]);
   const [newProjectName, setNewProjectName] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [uploadType, setUploadType] = useState<'SOURCE' | 'TARGET' | 'FORBIDDEN' | 'RANGE'>('SOURCE');
   const [linkSuggestions, setLinkSuggestions] = useState<LinkSuggestion[]>([]);
   const [selectedSuggestionIds, setSelectedSuggestionIds] = useState<Set<string>>(new Set());
@@ -144,38 +145,65 @@ function App() {
     }
   };
 
-  // Upload files (supports multiple)
+  // Upload files (supports multiple) with Progress
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (!e.target.files?.length || !selectedProject) return;
 
     setUploading(true);
+    setUploadProgress(0);
     const files = Array.from(e.target.files);
 
-    const uploadSingleFile = async (file: File, allowOverwrite = false): Promise<void> => {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('tableType', uploadType);
+    const uploadSingleFile = (file: File, allowOverwrite = false): Promise<void> => {
+      return new Promise((resolve) => {
+        const formData = new FormData();
+        formData.append('file', file);
+        formData.append('tableType', uploadType);
 
-      const url = `${API_URL}/projects/${selectedProject.id}/upload` + (allowOverwrite ? '?overwrite=true' : '');
+        const url = `${API_URL}/projects/${selectedProject.id}/upload` + (allowOverwrite ? '?overwrite=true' : '');
 
-      try {
-        const res = await fetch(url, { method: 'POST', body: formData });
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', url);
 
-        if (res.status === 409) {
-          const data = await res.json();
-          if (confirm(`Tabulka '${data.tableName}' již existuje. Chcete ji přepsat? Stará data budou smazána.`)) {
-            await uploadSingleFile(file, true);
+        xhr.upload.onprogress = (event) => {
+          if (event.lengthComputable) {
+            const percent = Math.round((event.loaded / event.total) * 100);
+            setUploadProgress(percent);
           }
-          return;
-        }
+        };
 
-        const result = await res.json();
-        if (!res.ok || !result.success) {
-          throw new Error(result.error || 'Upload failed');
-        }
-      } catch (err) {
-        alert(`Error uploading ${file.name}: ${(err as Error).message}`);
-      }
+        xhr.onload = () => {
+          if (xhr.status === 409) {
+            try {
+              const data = JSON.parse(xhr.responseText);
+              if (confirm(`Tabulka '${data.tableName}' již existuje. Chcete ji přepsat? Stará data budou smazána.`)) {
+                resolve(uploadSingleFile(file, true));
+              } else {
+                resolve();
+              }
+            } catch { resolve(); }
+            return;
+          }
+
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve();
+          } else {
+            try {
+              const res = JSON.parse(xhr.responseText);
+              alert(`Error uploading ${file.name}: ${res.error}`);
+            } catch {
+              alert(`Error uploading ${file.name}: Server Error ${xhr.status}`);
+            }
+            resolve();
+          }
+        };
+
+        xhr.onerror = () => {
+          alert(`Network error uploading ${file.name}`);
+          resolve();
+        };
+
+        xhr.send(formData);
+      });
     };
 
     try {
@@ -186,6 +214,7 @@ function App() {
       loadProjects();
     } finally {
       setUploading(false);
+      setUploadProgress(0);
       e.target.value = '';
     }
   };
@@ -388,16 +417,23 @@ function App() {
                     <option value="RANGE">🔢 Rozsah hodnot</option>
                   </select>
 
-                  <label className="upload-btn">
-                    {uploading ? 'Nahrávám...' : '📁 Nahrát Excel'}
-                    <input
-                      type="file"
-                      accept=".xlsx,.xls,.csv"
-                      multiple
-                      onChange={handleFileUpload}
-                      disabled={uploading}
-                    />
-                  </label>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '5px' }}>
+                    <label className={`upload-btn ${uploading ? 'disabled' : ''}`} style={{ textAlign: 'center', position: 'relative' }}>
+                      {uploading ? `Nahrávám... ${uploadProgress}%` : '📁 Nahrát Excel'}
+                      <input
+                        type="file"
+                        accept=".xlsx,.xls,.csv"
+                        multiple
+                        onChange={handleFileUpload}
+                        disabled={uploading}
+                      />
+                    </label>
+                    {uploading && (
+                      <div style={{ width: '100%', height: '4px', background: '#e5e7eb', borderRadius: '2px', overflow: 'hidden' }}>
+                        <div style={{ width: `${uploadProgress}%`, height: '100%', background: '#3b82f6', transition: 'width 0.2s ease-out' }}></div>
+                      </div>
+                    )}
+                  </div>
 
                   {tables.length > 0 && (
                     <>
