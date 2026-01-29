@@ -474,9 +474,16 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
 
         // 1. INTEGRITY CHECKS (Orphans) - SQL Optimized
         const integrityErrors = [];
+        const reconciliationErrors = [];
+        const allChecks: Array<{ type: string; label: string; status: 'OK' | 'ERROR'; checked: number; failed: number; }> = [];
 
         for (const fkCol of fkColumns) {
             if (!fkCol.linkedToColumn) continue;
+
+            // Get total checked count (non-empty values)
+            const checkedCount = await prisma.columnValue.count({
+                where: { columnId: fkCol.id, value: { not: '' } }
+            });
 
             const orphans = await prisma.$queryRaw<Array<{ value: string }>>`
                 SELECT v.value 
@@ -512,7 +519,23 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
                     pkColumn: fkCol.linkedToColumn.columnName,
                     missingValues: orphans.slice(0, 10).map(o => o.value),
                     missingCount: Number(countRes[0].count),
-                    totalFkValues: 0
+                    totalFkValues: checkedCount
+                });
+
+                allChecks.push({
+                    type: 'INTEGRITA',
+                    label: `${fkCol.tableName}.${fkCol.columnName} -> ${fkCol.linkedToColumn.tableName}`,
+                    status: 'ERROR',
+                    checked: checkedCount,
+                    failed: Number(countRes[0].count)
+                });
+            } else {
+                allChecks.push({
+                    type: 'INTEGRITA',
+                    label: `${fkCol.tableName}.${fkCol.columnName} -> ${fkCol.linkedToColumn.tableName}`,
+                    status: 'OK',
+                    checked: checkedCount,
+                    failed: 0
                 });
             }
         }
@@ -538,13 +561,22 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
             }
         }
 
-        const reconciliationErrors = [];
-
         for (const [pairKey, group] of tablePairs.entries()) {
             if (!group.keyLink || group.valueLinks.length === 0) continue;
 
+            // Get Checked Count (Joined rows)
+            const joinedCountRes = await prisma.$queryRaw<Array<{ count: bigint }>>`
+                SELECT COUNT(*) as count
+                FROM "column_values" s_key
+                JOIN "column_values" t_key 
+                    ON s_key.value = t_key.value 
+                    AND t_key."columnId" = ${group.keyLink.linkedToColumnId}
+                WHERE s_key."columnId" = ${group.keyLink.id}
+                  AND s_key.value != ''
+            `;
+            const checkedCount = Number(joinedCountRes[0].count);
+
             for (const valCol of group.valueLinks) {
-                // Check for value mismatch where Keys match
                 const mismatches = await prisma.$queryRaw<Array<{ key: string, source: string, target: string }>>`
                     SELECT 
                         s_key.value as key,
@@ -566,7 +598,17 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
                 `;
 
                 if (mismatches.length > 0) {
-                    // For perf, we use the length as min count check
+                    const mismatchCountRes = await prisma.$queryRaw<Array<{ count: bigint }>>`
+                        SELECT COUNT(*) as count
+                        FROM "column_values" s_key
+                        JOIN "column_values" t_key ON s_key.value = t_key.value AND t_key."columnId" = ${group.keyLink.linkedToColumnId}
+                        JOIN "column_values" s_val ON s_val."rowIndex" = s_key."rowIndex" AND s_val."columnId" = ${valCol.id}
+                        JOIN "column_values" t_val ON t_val."rowIndex" = t_key."rowIndex" AND t_val."columnId" = ${valCol.linkedToColumnId}
+                        WHERE s_key."columnId" = ${group.keyLink.id}
+                          AND s_val.value != t_val.value
+                     `;
+                    const failedCount = Number(mismatchCountRes[0].count);
+
                     reconciliationErrors.push({
                         sourceTable: valCol.tableName,
                         sourceColumn: valCol.columnName,
@@ -574,7 +616,23 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
                         targetColumn: valCol.linkedToColumn?.columnName,
                         joinKey: group.keyLink.columnName,
                         mismatches: mismatches.slice(0, 10),
-                        count: mismatches.length >= 11 ? '10+' : mismatches.length
+                        count: failedCount
+                    });
+
+                    allChecks.push({
+                        type: 'REKONSILIACE',
+                        label: `${valCol.tableName}.${valCol.columnName} vs ${valCol.linkedToColumn?.tableName}.${valCol.linkedToColumn?.columnName}`,
+                        status: 'ERROR',
+                        checked: checkedCount,
+                        failed: failedCount
+                    });
+                } else {
+                    allChecks.push({
+                        type: 'REKONSILIACE',
+                        label: `${valCol.tableName}.${valCol.columnName} vs ${valCol.linkedToColumn?.tableName}.${valCol.linkedToColumn?.columnName}`,
+                        status: 'OK',
+                        checked: checkedCount,
+                        failed: 0
                     });
                 }
             }
@@ -582,7 +640,7 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
 
         // Generate Protocol
         const totalFailed = integrityErrors.length + reconciliationErrors.length;
-        const totalPassed = fkColumns.length - (integrityErrors.length + reconciliationErrors.length);
+        const totalPassed = allChecks.filter(c => c.status === 'OK').length;
         const status = totalFailed === 0 ? 'ÚSPĚŠNÉ' : 'S CHYBAMI';
         const timestamp = new Date().toLocaleString('cs-CZ');
 
