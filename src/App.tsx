@@ -438,7 +438,6 @@ function App() {
                                 <select
                                   value={col.linkedToColumnId || ''}
                                   onChange={(e) => setColumnLink(col.id, e.target.value || null)}
-                                  disabled={col.isPrimaryKey}
                                 >
                                   <option value="">—</option>
                                   {getPrimaryKeyColumns()
