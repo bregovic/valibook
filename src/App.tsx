@@ -82,6 +82,7 @@ function App() {
   const [statusText, setStatusText] = useState('');
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const [hideEmptyColumns, setHideEmptyColumns] = useState(false);
+  const [showLinkedOnly, setShowLinkedOnly] = useState(false);
   const [uploadType, setUploadType] = useState<'SOURCE' | 'TARGET' | 'FORBIDDEN' | 'RANGE'>('SOURCE');
   const [linkSuggestions, setLinkSuggestions] = useState<LinkSuggestion[]>([]);
   const [selectedSuggestionIds, setSelectedSuggestionIds] = useState<Set<string>>(new Set());
@@ -247,21 +248,21 @@ function App() {
       const data = await res.json();
 
       if (data.success) {
-        // Filter out suggestions that are already applied
+        setLinkSuggestions(data.suggestions);
+
+        // Count new suggestions for alert
         const activeLinks = new Set<string>();
         tables.forEach(t => t.columns.forEach(c => {
           if (c.linkedToColumnId) activeLinks.add(`${c.id}|${c.linkedToColumnId}`);
         }));
 
-        const newSuggestions = data.suggestions.filter((s: LinkSuggestion) =>
+        const newCount = data.suggestions.filter((s: LinkSuggestion) =>
           !activeLinks.has(`${s.sourceColumnId}|${s.targetColumnId}`)
-        );
+        ).length;
 
-        setLinkSuggestions(newSuggestions);
-
-        if (newSuggestions.length === 0 && data.suggestions.length > 0) {
+        if (newCount === 0 && data.suggestions.length > 0) {
           alert('Všechny nalezené vazby jsou již nastaveny.');
-        } else if (newSuggestions.length === 0) {
+        } else if (data.suggestions.length === 0) {
           alert('Nebyly nalezeny žádné nové vazby.');
         }
       }
@@ -482,6 +483,18 @@ function App() {
                     </label>
                   </div>
 
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <input
+                      type="checkbox"
+                      id="showLinked"
+                      checked={showLinkedOnly}
+                      onChange={(e) => setShowLinkedOnly(e.target.checked)}
+                    />
+                    <label htmlFor="showLinked" style={{ fontSize: '0.9rem', cursor: 'pointer', userSelect: 'none' }}>
+                      Jen s vazbou
+                    </label>
+                  </div>
+
                   {tables.length > 0 && (
                     <>
                       <button
@@ -612,7 +625,7 @@ function App() {
                         </tr>
                       </thead>
                       <tbody>
-                        {linkSuggestions.map((s, i) => (
+                        {linkSuggestions.filter(s => !tables.some(t => t.columns.some(c => c.id === s.sourceColumnId && c.linkedToColumnId === s.targetColumnId))).map((s, i) => (
                           <tr key={i} className="suggestion-item">
                             <td>
                               <input
@@ -670,7 +683,7 @@ function App() {
                         </thead>
                         <tbody>
                           {table.columns
-                            .filter(col => !hideEmptyColumns || (col.uniqueCount ?? 0) > 0)
+                            .filter(col => (!hideEmptyColumns || (col.uniqueCount ?? 0) > 0) && (!showLinkedOnly || col.linkedToColumnId))
                             .map(col => (
                               <tr key={col.id}>
                                 <td className="col-name">{col.columnName}</td>
@@ -693,14 +706,41 @@ function App() {
                                   <select
                                     value={col.linkedToColumnId || ''}
                                     onChange={(e) => setColumnLink(col.id, e.target.value || null)}
+                                    style={{
+                                      border: (linkSuggestions.some(s => s.sourceColumnId === col.id) && !col.linkedToColumnId) ? '2px solid #3b82f6' : '1px solid #e2e8f0'
+                                    }}
                                   >
                                     <option value="">—</option>
-                                    {getPrimaryKeyColumns()
-                                      .filter(pk => pk.id !== col.id)
-                                      .map(pk => (
-                                        <option key={pk.id} value={pk.id}>{pk.label}</option>
-                                      ))
-                                    }
+                                    {(() => {
+                                      const relevantSuggestions = linkSuggestions.filter(s => s.sourceColumnId === col.id);
+                                      const suggestedTargets = new Set(relevantSuggestions.map(s => s.targetColumnId));
+                                      const allPks = getPrimaryKeyColumns().filter(pk => pk.id !== col.id);
+
+                                      const suggested = allPks.filter(pk => suggestedTargets.has(pk.id));
+                                      const others = allPks.filter(pk => !suggestedTargets.has(pk.id));
+
+                                      return (
+                                        <>
+                                          {suggested.length > 0 && (
+                                            <optgroup label="✨ Doporučené">
+                                              {suggested.map(pk => {
+                                                const score = relevantSuggestions.find(s => s.targetColumnId === pk.id)?.matchPercentage;
+                                                return (
+                                                  <option key={pk.id} value={pk.id}>
+                                                    {pk.label} ({score}%)
+                                                  </option>
+                                                );
+                                              })}
+                                            </optgroup>
+                                          )}
+                                          <optgroup label="Ostatní">
+                                            {others.map(pk => (
+                                              <option key={pk.id} value={pk.id}>{pk.label}</option>
+                                            ))}
+                                          </optgroup>
+                                        </>
+                                      );
+                                    })()}
                                   </select>
                                 </td>
                               </tr>
