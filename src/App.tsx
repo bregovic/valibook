@@ -89,6 +89,9 @@ function App() {
   const [detecting, setDetecting] = useState(false);
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
+  const [showManualLinkModal, setShowManualLinkModal] = useState(false);
+  const [manualLinkSource, setManualLinkSource] = useState<{ table: string; column: string } | null>(null);
+  const [manualLinkTarget, setManualLinkTarget] = useState<{ table: string; column: string } | null>(null);
 
   // Load projects
   const loadProjects = useCallback(async () => {
@@ -363,6 +366,51 @@ function App() {
       }));
   };
 
+  // Get all columns for manual linking
+  const getAllColumns = () => {
+    return tables.flatMap(t =>
+      t.columns.map(c => ({
+        id: c.id,
+        tableName: t.tableName,
+        columnName: c.columnName,
+        label: `${t.tableName}.${c.columnName}`
+      }))
+    );
+  };
+
+  // Create manual link
+  const createManualLink = async () => {
+    if (!manualLinkSource || !manualLinkTarget) return;
+
+    // Find source and target column IDs
+    const allCols = getAllColumns();
+    const sourceCol = allCols.find(c =>
+      c.tableName === manualLinkSource.table && c.columnName === manualLinkSource.column
+    );
+    const targetCol = allCols.find(c =>
+      c.tableName === manualLinkTarget.table && c.columnName === manualLinkTarget.column
+    );
+
+    if (!sourceCol || !targetCol) {
+      alert('Sloupec nenalezen');
+      return;
+    }
+
+    await setColumnLink(sourceCol.id, targetCol.id);
+
+    // Mark target as PK
+    await fetch(`${API_URL}/columns/${targetCol.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isPrimaryKey: true })
+    });
+
+    setShowManualLinkModal(false);
+    setManualLinkSource(null);
+    setManualLinkTarget(null);
+    if (selectedProject) loadTables(selectedProject.id);
+  };
+
   // Validate FK integrity
   const validateProject = async () => {
     if (!selectedProject) return;
@@ -521,7 +569,7 @@ function App() {
 
                   {tables.length > 0 && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                      <div style={{ display: 'flex', gap: '10px' }}>
+                      <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                         <button
                           className="detect-btn"
                           onClick={detectLinks}
@@ -535,6 +583,20 @@ function App() {
                           disabled={validating}
                         >
                           {validating ? '⏳ Validuji...' : '✓ Validovat'}
+                        </button>
+                        <button
+                          style={{
+                            background: '#10b981',
+                            color: 'white',
+                            border: 'none',
+                            padding: '8px 16px',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            fontWeight: 500
+                          }}
+                          onClick={() => setShowManualLinkModal(true)}
+                        >
+                          ➕ Ruční vazba
                         </button>
                       </div>
                       {(detecting || validating) && (
@@ -809,6 +871,134 @@ function App() {
           )}
         </main>
       </div>
+
+      {/* Manual Link Modal */}
+      {showManualLinkModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: 'white',
+            borderRadius: '12px',
+            padding: '24px',
+            width: '500px',
+            maxWidth: '90vw',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.3)'
+          }}>
+            <h3 style={{ marginBottom: '20px' }}>➕ Vytvořit ruční vazbu</h3>
+
+            {/* Source selection */}
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ display: 'block', fontWeight: 500, marginBottom: '6px' }}>
+                Zdrojový sloupec (FK):
+              </label>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <select
+                  style={{ flex: 1, padding: '8px' }}
+                  value={manualLinkSource?.table || ''}
+                  onChange={(e) => setManualLinkSource({ table: e.target.value, column: '' })}
+                >
+                  <option value="">-- Vyberte tabulku --</option>
+                  {tables.map(t => (
+                    <option key={t.tableName} value={t.tableName}>{t.tableName}</option>
+                  ))}
+                </select>
+                <select
+                  style={{ flex: 1, padding: '8px' }}
+                  value={manualLinkSource?.column || ''}
+                  onChange={(e) => setManualLinkSource(prev => prev ? { ...prev, column: e.target.value } : null)}
+                  disabled={!manualLinkSource?.table}
+                >
+                  <option value="">-- Vyberte sloupec --</option>
+                  {manualLinkSource?.table && tables
+                    .find(t => t.tableName === manualLinkSource.table)
+                    ?.columns.map(c => (
+                      <option key={c.id} value={c.columnName}>{c.columnName}</option>
+                    ))
+                  }
+                </select>
+              </div>
+            </div>
+
+            {/* Target selection */}
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', fontWeight: 500, marginBottom: '6px' }}>
+                Cílový sloupec (PK):
+              </label>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <select
+                  style={{ flex: 1, padding: '8px' }}
+                  value={manualLinkTarget?.table || ''}
+                  onChange={(e) => setManualLinkTarget({ table: e.target.value, column: '' })}
+                >
+                  <option value="">-- Vyberte tabulku --</option>
+                  {tables.map(t => (
+                    <option key={t.tableName} value={t.tableName}>{t.tableName}</option>
+                  ))}
+                </select>
+                <select
+                  style={{ flex: 1, padding: '8px' }}
+                  value={manualLinkTarget?.column || ''}
+                  onChange={(e) => setManualLinkTarget(prev => prev ? { ...prev, column: e.target.value } : null)}
+                  disabled={!manualLinkTarget?.table}
+                >
+                  <option value="">-- Vyberte sloupec --</option>
+                  {manualLinkTarget?.table && tables
+                    .find(t => t.tableName === manualLinkTarget.table)
+                    ?.columns.map(c => (
+                      <option key={c.id} value={c.columnName}>{c.columnName}</option>
+                    ))
+                  }
+                </select>
+              </div>
+            </div>
+
+            {/* Actions */}
+            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+              <button
+                style={{
+                  padding: '10px 20px',
+                  border: '1px solid #ddd',
+                  borderRadius: '6px',
+                  background: 'white',
+                  cursor: 'pointer'
+                }}
+                onClick={() => {
+                  setShowManualLinkModal(false);
+                  setManualLinkSource(null);
+                  setManualLinkTarget(null);
+                }}
+              >
+                Zrušit
+              </button>
+              <button
+                style={{
+                  padding: '10px 20px',
+                  border: 'none',
+                  borderRadius: '6px',
+                  background: '#10b981',
+                  color: 'white',
+                  cursor: 'pointer',
+                  fontWeight: 500
+                }}
+                onClick={createManualLink}
+                disabled={!manualLinkSource?.column || !manualLinkTarget?.column}
+              >
+                ✓ Vytvořit vazbu
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
