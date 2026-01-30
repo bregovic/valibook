@@ -687,8 +687,12 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
             });
 
             for (const fCol of forbiddenColumns) {
-                // Check ALL columns in SOURCE/TARGET tables (not just matching names)
-                for (const tCol of candidateColumns) {
+                // Only check columns with SAME NAME (case insensitive) for performance
+                const matchingColumns = candidateColumns.filter(
+                    c => c.columnName.toLowerCase() === fCol.columnName.toLowerCase()
+                );
+
+                for (const tCol of matchingColumns) {
                     // Skip if same table
                     if (tCol.tableName === fCol.tableName) continue;
 
