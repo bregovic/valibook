@@ -449,14 +449,16 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                     if (valuesB.has(sample)) matchCount++;
                 }
 
-                // Require 100% match AND minimum 3 samples
-                if (matchCount === samplesA.length && samplesA.length >= 3) {
-                    // Check uniqueness: at least one side must have ALL values unique (no duplicates at all)
-                    const isSourceUnique = colA.uniqueCount === colA.rowCount && (colA.rowCount ?? 0) > 0;
-                    const isTargetUnique = colB.uniqueCount === colB.rowCount && (colB.rowCount ?? 0) > 0;
+                // Require 80% match AND minimum 3 samples
+                const matchPercentage = Math.round((matchCount / samplesA.length) * 100);
+                if (matchPercentage >= 80 && matchCount >= 3) {
+                    // Check uniqueness: at least one side must have 90%+ unique values
+                    const sourceUniqueRatio = (colA.uniqueCount ?? 0) / Math.max(colA.rowCount ?? 1, 1);
+                    const targetUniqueRatio = (colB.uniqueCount ?? 0) / Math.max(colB.rowCount ?? 1, 1);
+                    const isSourceUnique = sourceUniqueRatio >= 0.9 && (colA.rowCount ?? 0) > 0;
+                    const isTargetUnique = targetUniqueRatio >= 0.9 && (colB.rowCount ?? 0) > 0;
 
                     if (isSourceUnique || isTargetUnique) {
-                        const matchPercentage = 100;
                         suggestions.push({
                             sourceColumnId: colA.id,
                             sourceColumn: colA.columnName,
