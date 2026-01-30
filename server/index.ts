@@ -432,6 +432,9 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
             sampleSize: number;
         }> = [];
 
+        // Track seen pairs to avoid duplicates (A->B and B->A)
+        const seenPairs = new Set<string>();
+
         for (const colA of columns) {
             const samplesA = columnSamplesMap.get(colA.id);
             if (!samplesA || samplesA.length === 0) continue;
@@ -439,6 +442,10 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
             for (const colB of columns) {
                 if (colA.id === colB.id) continue;
                 if (colA.tableName === colB.tableName) continue; // Same table
+
+                // Skip if we've already seen this pair (in either direction)
+                const pairKey = [colA.id, colB.id].sort().join('|');
+                if (seenPairs.has(pairKey)) continue;
 
                 const valuesB = columnAllValuesMap.get(colB.id);
                 if (!valuesB || valuesB.size === 0) continue;
@@ -459,17 +466,37 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                     const isTargetUnique = targetUniqueRatio >= 0.9 && (colB.rowCount ?? 0) > 0;
 
                     if (isSourceUnique || isTargetUnique) {
-                        suggestions.push({
-                            sourceColumnId: colA.id,
-                            sourceColumn: colA.columnName,
-                            sourceTable: colA.tableName,
-                            targetColumnId: colB.id,
-                            targetColumn: colB.columnName,
-                            targetTable: colB.tableName,
-                            matchPercentage,
-                            commonValues: matchCount,
-                            sampleSize: samplesA.length
-                        });
+                        // Mark this pair as seen
+                        seenPairs.add(pairKey);
+
+                        // Determine direction: FK (less unique) -> PK (more unique)
+                        const shouldReverse = targetUniqueRatio < sourceUniqueRatio;
+
+                        if (shouldReverse) {
+                            suggestions.push({
+                                sourceColumnId: colB.id,
+                                sourceColumn: colB.columnName,
+                                sourceTable: colB.tableName,
+                                targetColumnId: colA.id,
+                                targetColumn: colA.columnName,
+                                targetTable: colA.tableName,
+                                matchPercentage,
+                                commonValues: matchCount,
+                                sampleSize: samplesA.length
+                            });
+                        } else {
+                            suggestions.push({
+                                sourceColumnId: colA.id,
+                                sourceColumn: colA.columnName,
+                                sourceTable: colA.tableName,
+                                targetColumnId: colB.id,
+                                targetColumn: colB.columnName,
+                                targetTable: colB.tableName,
+                                matchPercentage,
+                                commonValues: matchCount,
+                                sampleSize: samplesA.length
+                            });
+                        }
                     }
                 }
             }
