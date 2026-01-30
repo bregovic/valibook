@@ -115,6 +115,7 @@ function App() {
     if (selectedProject) {
       loadTables(selectedProject.id);
       setLinkSuggestions([]); // Clear suggestions when switching projects
+      setValidationResult(null); // Clear validation result when switching projects
     }
   }, [selectedProject, loadTables]);
 
