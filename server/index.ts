@@ -729,21 +729,24 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
                         match_count: bigint;
                         sample_values: string;
                     }>>`
+                        WITH matched AS (
+                            SELECT f.value
+                            FROM (
+                                SELECT DISTINCT f.value
+                                FROM "column_values" f
+                                WHERE f."columnId" = ${fCol.id}
+                                  AND f.value != ''
+                            ) f
+                            JOIN (
+                                SELECT DISTINCT t.value
+                                FROM "column_values" t
+                                WHERE t."columnId" = ${tCol.id}
+                                  AND t.value != ''
+                            ) t ON f.value = t.value
+                        )
                         SELECT 
-                            COUNT(*) as match_count,
-                            STRING_AGG(f.value, ', ' ORDER BY f.value LIMIT 10) as sample_values
-                        FROM (
-                            SELECT DISTINCT f.value
-                            FROM "column_values" f
-                            WHERE f."columnId" = ${fCol.id}
-                              AND f.value != ''
-                        ) f
-                        JOIN (
-                            SELECT DISTINCT t.value
-                            FROM "column_values" t
-                            WHERE t."columnId" = ${tCol.id}
-                              AND t.value != ''
-                        ) t ON f.value = t.value
+                            (SELECT COUNT(*) FROM matched) as match_count,
+                            (SELECT STRING_AGG(value, ', ') FROM (SELECT value FROM matched ORDER BY value LIMIT 10) sub) as sample_values
                     `;
 
                     if (intersection.length > 0 && Number(intersection[0].match_count) > 0) {
