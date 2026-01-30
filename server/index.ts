@@ -531,88 +531,87 @@ app.post('/api/projects/:projectId/ai-suggest-rules', async (req, res) => {
             const key = `${col.tableName}.${col.columnName}`;
             columnIdMap[key] = col.id;
 
+            // TRUNCATE SAMPLES to avoid huge requests
+            const rawSamples = (col.sampleValues as string[]) || [];
+            const safeSamples = rawSamples.slice(0, 3).map(s => String(s).substring(0, 100));
+
             tablesProfile[col.tableName].push({
                 column: col.columnName,
                 type: col.dataType || 'STRING',
                 isPrimaryKey: col.isPrimaryKey,
                 linkedTo: col.linkedToColumnId ? idToNameMap[col.linkedToColumnId] : null,
-                sample: col.sampleValues ? (col.sampleValues as string[]).slice(0, 3) : [],
-                stats: {
-                    unique: col.uniqueCount,
-                    nulls: col.nullCount,
-                    rowCount: col.rowCount
-                }
+                sample: safeSamples,
+                unique: col.uniqueCount,
+                nulls: col.nullCount
             });
         }
 
-        // 3. Construct Prompt
-        const prompt = `
-            You are a Financial Data Auditor and Data Quality Engineer. Analyze the database schema below and suggest validation rules.
-            
-            SCHEMA:
-            ${JSON.stringify(tablesProfile, null, 2)}
+        // 3. Construct and Call OpenAI in chunks of tables
+        const tableNames = Object.keys(tablesProfile);
+        const CHUNK_SIZE = 10;
+        const allSuggestedRules = [];
 
-            INSTRUCTIONS:
-            - Focus on: VAT numbers, Emails, Phone numbers, IDs, Required fields.
-            - FINANCIAL FOCUS: Identify columns like Amounts (debit, credit, total), Currencies, Exchange Rates, and Dates.
-            - Suggest special rules for:
-                1. REGEX: Standard formats.
-                2. NOT_NULL / UNIQUE as before.
-                3. MATH_EQUATION: If you see columns like 'Amount', 'Rate', 'Total', suggest a rule: 'Amount * Rate = Total'.
-                4. CURRENCY_CONSISTENCY: Ensure specific tables have valid ISO currency codes.
-            - Output ONLY valid JSON array.
+        console.log(`Starting AI Rule Suggestion for ${tableNames.length} tables in chunks of ${CHUNK_SIZE}...`);
 
-            OUTPUT FORMAT:
-            [
-                {
-                    "table": "TableName",
-                    "column": "ColumnName",
-                    "type": "REGEX" | "NOT_NULL" | "UNIQUE" | "MATH_EQUATION" | "CURRENCY_CONSISTENCY",
-                    "value": "^[A-Z]{3}$" (for currency regex) or "[column1] * [column2] = [column3]" (for MATH_EQUATION),
-                    "description": "Short explanation in Czech",
-                    "severity": "ERROR" | "WARNING"
+        for (let i = 0; i < tableNames.length; i += CHUNK_SIZE) {
+            const chunkNames = tableNames.slice(i, i + CHUNK_SIZE);
+            const chunkProfile: Record<string, any> = {};
+            chunkNames.forEach(name => { chunkProfile[name] = tablesProfile[name]; });
+
+            console.log(`Processing chunk ${Math.floor(i / CHUNK_SIZE) + 1}/${Math.ceil(tableNames.length / CHUNK_SIZE)} (${chunkNames.join(', ')})`);
+
+            const prompt = `
+                Analyze the database schema below and suggest validation rules.
+                SCHEMA: ${JSON.stringify(chunkProfile)}
+
+                INSTRUCTIONS:
+                - Focus: VAT, Emails, Phone, IDs, Required fields, Amounts, Currencies, Dates.
+                - Rules: REGEX, NOT_NULL, UNIQUE, MATH_EQUATION (e.g. A*B=C), CURRENCY_CONSISTENCY (ISO codes).
+                - Output ONLY valid JSON array.
+
+                FORMAT:
+                [{"table":"T","column":"C","type":"REGEX","value":"...","description":"...","severity":"ERROR"}]
+            `;
+
+            const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${finalApiKey}`
+                },
+                body: JSON.stringify({
+                    model: "gpt-4o-mini",
+                    messages: [
+                        { role: "system", content: "You are a Data Quality assistant. Output JSON array only." },
+                        { role: "user", content: prompt }
+                    ],
+                    temperature: 0.1
+                })
+            });
+
+            if (!aiRes.ok) {
+                const errText = await aiRes.text();
+                console.error(`OpenAI Error in chunk: ${errText}`);
+                continue; // Try next chunk
+            }
+
+            const aiData = await aiRes.json();
+            let content = aiData.choices[0].message.content;
+            content = content.replace(/```json/g, '').replace(/```/g, '').trim();
+
+            try {
+                const suggestedRules = JSON.parse(content);
+                if (Array.isArray(suggestedRules)) {
+                    allSuggestedRules.push(...suggestedRules);
                 }
-            ]
-        `;
-
-        // 4. Call OpenAI
-        const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${finalApiKey}`
-            },
-            body: JSON.stringify({
-                model: "gpt-4o-mini", // Cost effective
-                messages: [
-                    { role: "system", content: "You are a pragmatic Data Quality assistant. Output JSON only." },
-                    { role: "user", content: prompt }
-                ],
-                temperature: 0.2
-            })
-        });
-
-        if (!aiRes.ok) {
-            const errText = await aiRes.text();
-            throw new Error(`OpenAI API Error: ${errText}`);
+            } catch (e) {
+                console.error("Failed to parse AI response chunk", e);
+            }
         }
 
-        const aiData = await aiRes.json();
-        let content = aiData.choices[0].message.content;
-
-        // Clean markdown code blocks if present
-        content = content.replace(/```json/g, '').replace(/```/g, '').trim();
-
-        const suggestedRules = JSON.parse(content);
-
-        // 5. Save Rules to DB
+        // 4. Save Rules to DB
         const savedRules = [];
-
-        // Clear existing rules for this project (optional, or append?) 
-        // Let's APPEND/UPDATE but for now we just create new ones.
-        // Actually, user might want to clear old ones first. Let's keep it simple: create.
-
-        for (const rule of suggestedRules) {
+        for (const rule of allSuggestedRules) {
             const key = `${rule.table}.${rule.column}`;
             const columnId = columnIdMap[key];
 
@@ -1046,7 +1045,7 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
 
                         allChecks.push({
                             type: 'ZAKÁZANÉ',
-                            label: `${tCol.tableName}.${tCol.columnName} obsahuje ${failedCount}x hodnot z ${fCol.tableName}.${fCol.columnName}`,
+                            label: `${tCol.tableName}.${tCol.columnName} obsahuje ${failedCount}x zakázanou hodnotu z ${fCol.tableName} (${sampleValues.join(', ')})`,
                             status: 'ERROR',
                             checked: 0,
                             failed: failedCount

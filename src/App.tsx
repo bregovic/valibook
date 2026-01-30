@@ -92,6 +92,7 @@ function App() {
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
   const [activeValidationTab, setActiveValidationTab] = useState<'SUMMARY' | 'INTEGRITY' | 'FORBIDDEN' | 'RULES' | 'RECONCILE' | 'PROTOCOL'>('SUMMARY');
+  const [validationSearchTerm, setValidationSearchTerm] = useState('');
   const [showManualLinkModal, setShowManualLinkModal] = useState(false);
   const [manualLinkSource, setManualLinkSource] = useState<{ table: string; column: string } | null>(null);
   const [manualLinkTarget, setManualLinkTarget] = useState<{ table: string; column: string } | null>(null);
@@ -791,6 +792,19 @@ function App() {
                     </button>
                   </div>
 
+                  {/* Search Bar for Results */}
+                  {activeValidationTab !== 'SUMMARY' && activeValidationTab !== 'PROTOCOL' && (
+                    <div className="validation-filter-bar" style={{ padding: '0 1rem 1rem 1rem' }}>
+                      <input
+                        type="text"
+                        placeholder="🔍 Filtrovat výsledky (tabulka, sloupec, hodnota...)"
+                        value={validationSearchTerm}
+                        onChange={(e) => setValidationSearchTerm(e.target.value)}
+                        style={{ width: '100%', padding: '0.75rem', borderRadius: '8px', border: '1px solid #e2e8f0', outline: 'none' }}
+                      />
+                    </div>
+                  )}
+
                   {/* Tab Content */}
                   <div className="validation-content">
 
@@ -832,28 +846,42 @@ function App() {
                     {/* 2. INTEGRITY (Foreign Keys) */}
                     {activeValidationTab === 'INTEGRITY' && (
                       <div className="validation-errors">
-                        {validationResult.errors.map((err, i) => (
-                          <div key={i} className="error-item">
-                            <div className="error-header">
-                              <strong>{err.fkTable}.{err.fkColumn}</strong>
-                              <span className="arrow">→</span>
-                              <strong>{err.pkTable}.{err.pkColumn}</strong>
-                              <span className="error-count">{err.missingCount} chybějících (sirotků)</span>
+                        {validationResult.errors
+                          .filter(err =>
+                            !validationSearchTerm ||
+                            err.fkTable.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
+                            err.fkColumn.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
+                            err.pkTable.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
+                            err.missingValues.some(v => v.toLowerCase().includes(validationSearchTerm.toLowerCase()))
+                          )
+                          .map((err, i) => (
+                            <div key={i} className="error-item">
+                              <div className="error-header">
+                                <strong>{err.fkTable}.{err.fkColumn}</strong>
+                                <span className="arrow">→</span>
+                                <strong>{err.pkTable}.{err.pkColumn}</strong>
+                                <span className="error-count">{err.missingCount} chybějících (sirotků)</span>
+                              </div>
+                              <div className="missing-values">
+                                <div style={{ marginBottom: '0.5rem', fontSize: '0.75rem', color: '#94a3b8' }}>Tyto hodnoty neexistují v číselníku {err.pkTable}:</div>
+                                {err.missingValues.join(', ')}
+                                {err.missingCount > 10 && ` ... a dalších ${err.missingCount - 10}`}
+                              </div>
                             </div>
-                            <div className="missing-values">
-                              <div style={{ marginBottom: '0.5rem', fontSize: '0.75rem', color: '#94a3b8' }}>Tyto hodnoty neexistují v číselníku {err.pkTable}:</div>
-                              {err.missingValues.join(', ')}
-                              {err.missingCount > 10 && ` ... a dalších ${err.missingCount - 10}`}
-                            </div>
-                          </div>
-                        ))}
+                          ))}
                       </div>
                     )}
 
                     {/* 3. FORBIDDEN VALUES */}
                     {activeValidationTab === 'FORBIDDEN' && (
                       <div className="validation-errors">
-                        {validationResult.forbidden?.map((err, i) => (
+                        {validationResult.forbidden?.filter(err =>
+                          !validationSearchTerm ||
+                          err.targetTable.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
+                          err.column.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
+                          err.forbiddenTable.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
+                          err.foundValues.some(v => v.toLowerCase().includes(validationSearchTerm.toLowerCase()))
+                        ).map((err, i) => (
                           <div key={i} className="error-item warning">
                             <div className="error-header">
                               <strong>{err.targetTable}.{err.column}</strong>
@@ -873,7 +901,13 @@ function App() {
                     {/* 4. AI RULES */}
                     {activeValidationTab === 'RULES' && (
                       <div className="validation-errors">
-                        {validationResult.validationRules?.map((err, i) => (
+                        {validationResult.validationRules?.filter(err =>
+                          !validationSearchTerm ||
+                          err.table.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
+                          err.column.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
+                          err.description?.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
+                          err.samples?.some(v => v.toLowerCase().includes(validationSearchTerm.toLowerCase()))
+                        ).map((err, i) => (
                           <div key={i} className="rule-error error-item">
                             <div className="rule-error-header">
                               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
