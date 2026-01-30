@@ -701,53 +701,56 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
             }
         }
 
-        // 3. FORBIDDEN VALUES CHECK - Using bulk query for performance
+        // 3. FORBIDDEN VALUES CHECK - Progressive processing per forbidden column
         const forbiddenColumns = await prisma.column.findMany({
             where: { projectId, tableType: 'FORBIDDEN' }
         });
 
         if (forbiddenColumns.length > 0) {
-            const forbiddenColIds = forbiddenColumns.map(c => c.id);
-
-            // Get all candidate column IDs
+            // Get ALL candidate columns (SOURCE and TARGET) - no name filtering
             const candidateColumns = await prisma.column.findMany({
                 where: {
                     projectId,
                     tableType: { in: ['SOURCE', 'TARGET'] }
                 }
             });
-            const candidateColIds = candidateColumns.map(c => c.id);
 
-            if (candidateColIds.length > 0 && forbiddenColIds.length > 0) {
-                // Single bulk query: find ALL intersections between forbidden and candidate columns
-                const intersections = await prisma.$queryRaw<Array<{
-                    forbidden_col_id: string;
-                    target_col_id: string;
-                    match_count: bigint;
-                    sample_values: string;
-                }>>`
-                    SELECT 
-                        f."columnId" as forbidden_col_id,
-                        t."columnId" as target_col_id,
-                        COUNT(*) as match_count,
-                        STRING_AGG(f.value, ', ' ORDER BY f.value) as sample_values
-                    FROM "column_values" f
-                    JOIN "column_values" t ON f.value = t.value
-                    WHERE f."columnId" = ANY(${forbiddenColIds}::text[])
-                      AND t."columnId" = ANY(${candidateColIds}::text[])
-                      AND f."columnId" != t."columnId"
-                    GROUP BY f."columnId", t."columnId"
-                    HAVING COUNT(*) > 0
-                `;
+            // Process each forbidden column one by one to prevent timeout
+            for (const fCol of forbiddenColumns) {
+                console.log(`[Forbidden Check] Processing: ${fCol.tableName}.${fCol.columnName}`);
 
-                // Process results
-                for (const row of intersections) {
-                    const fCol = forbiddenColumns.find(c => c.id === row.forbidden_col_id);
-                    const tCol = candidateColumns.find(c => c.id === row.target_col_id);
+                // For each forbidden column, check against ALL candidate columns
+                for (const tCol of candidateColumns) {
+                    // Skip if same table (forbidden values in same table don't make sense)
+                    if (fCol.tableName === tCol.tableName) continue;
 
-                    if (fCol && tCol && fCol.tableName !== tCol.tableName) {
-                        const failedCount = Number(row.match_count);
-                        const sampleValues = row.sample_values.split(', ').slice(0, 10);
+                    // Find intersection between this forbidden column and this candidate column
+                    const intersection = await prisma.$queryRaw<Array<{
+                        match_count: bigint;
+                        sample_values: string;
+                    }>>`
+                        SELECT 
+                            COUNT(*) as match_count,
+                            STRING_AGG(f.value, ', ' ORDER BY f.value LIMIT 10) as sample_values
+                        FROM (
+                            SELECT DISTINCT f.value
+                            FROM "column_values" f
+                            WHERE f."columnId" = ${fCol.id}
+                              AND f.value != ''
+                        ) f
+                        JOIN (
+                            SELECT DISTINCT t.value
+                            FROM "column_values" t
+                            WHERE t."columnId" = ${tCol.id}
+                              AND t.value != ''
+                        ) t ON f.value = t.value
+                    `;
+
+                    if (intersection.length > 0 && Number(intersection[0].match_count) > 0) {
+                        const failedCount = Number(intersection[0].match_count);
+                        const sampleValues = intersection[0].sample_values
+                            ? intersection[0].sample_values.split(', ').slice(0, 10)
+                            : [];
 
                         forbiddenErrors.push({
                             forbiddenTable: fCol.tableName,
@@ -760,14 +763,18 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
 
                         allChecks.push({
                             type: 'ZAKÁZANÉ',
-                            label: `${tCol.tableName}.${tCol.columnName} obsahuje hodnoty z ${fCol.tableName}.${fCol.columnName}`,
+                            label: `${tCol.tableName}.${tCol.columnName} obsahuje ${failedCount}x hodnot z ${fCol.tableName}.${fCol.columnName}`,
                             status: 'ERROR',
                             checked: 0,
                             failed: failedCount
                         });
+
+                        console.log(`  ❌ Found ${failedCount} forbidden values in ${tCol.tableName}.${tCol.columnName}`);
                     }
                 }
             }
+
+            console.log(`[Forbidden Check] Complete. Found ${forbiddenErrors.length} issues.`);
         }
 
         // Generate Protocol
