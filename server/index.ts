@@ -448,6 +448,39 @@ app.get('/api/projects/:projectId/profile', async (req, res) => {
 });
 
 // ============================================
+// SYSTEM CONFIG API (Global Settings)
+// ============================================
+app.get('/api/config', async (req, res) => {
+    try {
+        const config = await prisma.systemConfig.findUnique({
+            where: { key: 'OPENAI_API_KEY' }
+        });
+        res.json({ hasOpenAIKey: !!config && !!config.value && config.value.length > 0 });
+    } catch (error) {
+        res.status(500).json({ error: (error as Error).message }); // Handle DB not ready
+    }
+});
+
+app.post('/api/config', async (req, res) => {
+    const { key, value, password } = req.body;
+    if (password !== 'Heslo123') return res.status(403).json({ error: 'Nesprávné bezpečnostní heslo.' });
+
+    try {
+        if (!key || !value) return res.status(400).json({ error: 'Chybí klíč nebo hodnota.' });
+
+        await prisma.systemConfig.upsert({
+            where: { key },
+            update: { value },
+            create: { key, value }
+        });
+        res.json({ success: true });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: (error as Error).message });
+    }
+});
+
+// ============================================
 // AI SUGGEST RULES (OpenAI Integration)
 // ============================================
 app.post('/api/projects/:projectId/ai-suggest-rules', async (req, res) => {
@@ -458,8 +491,16 @@ app.post('/api/projects/:projectId/ai-suggest-rules', async (req, res) => {
     if (password !== 'Heslo123') {
         return res.status(403).json({ error: 'Neplatné heslo pro AI funkce.' });
     }
-    if (!apiKey) {
-        return res.status(400).json({ error: 'Chybí OpenAI API Key.' });
+
+    // 2. Resolve API Key (User provided OR System stored)
+    let finalApiKey = apiKey;
+    if (!finalApiKey) {
+        const config = await prisma.systemConfig.findUnique({ where: { key: 'OPENAI_API_KEY' } });
+        finalApiKey = config?.value;
+    }
+
+    if (!finalApiKey) {
+        return res.status(400).json({ error: 'Chybí OpenAI API Key. Nastavte ho v globálním nastavení nebo zadejte ručně.' });
     }
 
     try {
@@ -526,7 +567,7 @@ app.post('/api/projects/:projectId/ai-suggest-rules', async (req, res) => {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`
+                'Authorization': `Bearer ${finalApiKey}`
             },
             body: JSON.stringify({
                 model: "gpt-4o-mini", // Cost effective

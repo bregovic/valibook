@@ -109,6 +109,17 @@ model ValidationRule {
 }
 
 // ============================================
+// SYSTEM CONFIG - Globální nastavení
+// ============================================
+model SystemConfig {
+  key       String   @id // e.g. 'OPENAI_API_KEY'
+  value     String   // Encrypted or plain value
+  updatedAt DateTime @updatedAt
+
+  @@map("system_config")
+}
+
+// ============================================
 // COLUMN_VALUES - Data jednotlivých sloupců
 // ============================================
 // Ukládá obsah sloupce po řádcích

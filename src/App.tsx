@@ -97,21 +97,55 @@ function App() {
 
   // AI States
   const [showAIModal, setShowAIModal] = useState(false);
-  const [apiKey, setApiKey] = useState('');
+  /* REMOVED UNUSED apiKey STATE */
   const [aiPassword, setAiPassword] = useState('Heslo123');
   const [aiResult, setAiResult] = useState('');
   const [generatingAI, setGeneratingAI] = useState(false);
 
+  // System Config
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [hasSystemKey, setHasSystemKey] = useState(false);
+  const [newSystemKey, setNewSystemKey] = useState('');
+
+  const checkConfig = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/config`);
+      const data = await res.json();
+      setHasSystemKey(data.hasOpenAIKey);
+    } catch (e) { console.error(e); }
+  }, []);
+
+  useEffect(() => { checkConfig(); }, [checkConfig]);
+
+  const saveSettings = async () => {
+    try {
+      const res = await fetch(`${API_URL}/config`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: 'OPENAI_API_KEY', value: newSystemKey, password: aiPassword })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert('Nastavení uloženo.');
+        setShowSettingsModal(false);
+        setNewSystemKey('');
+        checkConfig();
+      } else {
+        alert('Chyba: ' + data.error);
+      }
+    } catch (e) { alert('Chyba spojení.'); }
+  };
+
   // Generate Rules Logic
   const generateAIRules = async () => {
-    if (!selectedProject || !apiKey) return;
+    if (!selectedProject) return;
     setGeneratingAI(true);
     setAiResult('Analyzuji strukturu dat...');
     try {
       const res = await fetch(`${API_URL}/projects/${selectedProject.id}/ai-suggest-rules`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey, password: aiPassword })
+        body: JSON.stringify({ apiKey: '', password: aiPassword }) // Backend will use stored key
       });
       const data = await res.json();
       if (data.success) {
@@ -477,6 +511,13 @@ function App() {
         <div className="logo-section">
           <img src="/logo.png" alt="Valibook" className="app-logo" />
           <h1>Valibook</h1>
+          <button
+            onClick={() => setShowSettingsModal(true)}
+            style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '1.2rem', padding: '0 8px' }}
+            title="Globální nastavení (API Key)"
+          >
+            ⚙️
+          </button>
         </div>
         <p>Excel Validation Tool</p>
       </header>
@@ -1049,6 +1090,58 @@ function App() {
         </div>
       )}
 
+      {/* Settings Modal */}
+      {showSettingsModal && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1100
+        }}>
+          <div style={{
+            background: 'white', padding: '24px', borderRadius: '12px', width: '400px', maxWidth: '90%',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.2)'
+          }}>
+            <h3 style={{ margin: '0 0 16px', color: '#1f2937' }}>⚙️ Globální Nastavení</h3>
+            <div style={{ marginBottom: '15px' }}>
+              <label style={{ display: 'block', marginBottom: '4px', fontWeight: 500 }}>OpenAI API Key</label>
+              <input
+                type="password"
+                placeholder={hasSystemKey ? "******** (Nastaveno)" : "sk-..."}
+                value={newSystemKey}
+                onChange={e => setNewSystemKey(e.target.value)}
+                style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }}
+              />
+              <small style={{ color: '#666', display: 'block', marginTop: '4px' }}>
+                Klíč bude bezpečně uložen v databázi a nebude se zobrazovat v UI.
+              </small>
+            </div>
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', marginBottom: '4px', fontWeight: 500 }}>Potvrzení heslem</label>
+              <input
+                type="password"
+                placeholder="Heslo"
+                value={aiPassword}
+                onChange={e => setAiPassword(e.target.value)}
+                style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }}
+              />
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+              <button
+                onClick={() => setShowSettingsModal(false)}
+                style={{ padding: '8px 16px', background: '#f3f4f6', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+              >
+                Zavřít
+              </button>
+              <button
+                onClick={saveSettings}
+                style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer' }}
+              >
+                Uložit nastavení
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* AI Rules Modal */}
       {showAIModal && (
         <div style={{
@@ -1076,18 +1169,20 @@ function App() {
             {!aiResult || aiResult.startsWith('Analyzuji') ? (
               <>
                 <p style={{ margin: '0 0 12px', color: '#4b5563', fontSize: '0.9rem' }}>
-                  Zadejte vaše OpenAI API Key pro analýzu struktury dat a generování validačních pravidel.
+                  Analýza struktury a generování pravidel probíhá pomocí OpenAI.
                 </p>
 
                 <div style={{ marginBottom: '12px' }}>
-                  <label style={{ display: 'block', marginBottom: '4px', fontSize: '0.85rem', fontWeight: 500 }}>OpenAI API Key (sk-...)</label>
-                  <input
-                    type="password"
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder="sk-..."
-                    style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #d1d5db' }}
-                  />
+                  <label style={{ display: 'block', marginBottom: '4px', fontSize: '0.85rem', fontWeight: 500 }}>Stav API Klíče</label>
+                  {hasSystemKey ? (
+                    <div style={{ padding: '8px', background: '#d1fae5', color: '#065f46', borderRadius: '6px', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      ✅ Klíč je nastaven v systému.
+                    </div>
+                  ) : (
+                    <div style={{ padding: '8px', background: '#fee2e2', color: '#b91c1c', borderRadius: '6px', fontSize: '0.9rem' }}>
+                      ⚠️ Chybí API Klíč! Nastavte ho v ⚙️ Nastavení (ikona vpravo nahoře).
+                    </div>
+                  )}
                 </div>
 
                 <div style={{ marginBottom: '20px' }}>
@@ -1111,14 +1206,14 @@ function App() {
                   </button>
                   <button
                     onClick={generateAIRules}
-                    disabled={generatingAI || !apiKey}
+                    disabled={generatingAI || !hasSystemKey}
                     style={{
                       padding: '8px 16px',
-                      background: generatingAI ? '#9ca3af' : '#8b5cf6',
+                      background: (generatingAI || !hasSystemKey) ? '#9ca3af' : '#8b5cf6',
                       color: 'white',
                       border: 'none',
                       borderRadius: '6px',
-                      cursor: generatingAI ? 'not-allowed' : 'pointer'
+                      cursor: (generatingAI || !hasSystemKey) ? 'not-allowed' : 'pointer'
                     }}
                   >
                     {generatingAI ? 'Generuji...' : '✨ Vygenerovat'}
