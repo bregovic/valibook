@@ -71,6 +71,7 @@ interface ForbiddenError {
 }
 
 interface AIRuleError {
+  ruleId: string;
   table: string;
   column: string;
   ruleType: string;
@@ -111,9 +112,13 @@ function App() {
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
   const [activeValidationTab, setActiveValidationTab] = useState<'SUMMARY' | 'INTEGRITY' | 'FORBIDDEN' | 'RULES' | 'RECONCILE' | 'PROTOCOL'>('SUMMARY');
   const [validationSearchTerm, setValidationSearchTerm] = useState('');
+  const [manualLinkTarget, setManualLinkTarget] = useState<{ table: string; column: string } | null>(null);
   const [showManualLinkModal, setShowManualLinkModal] = useState(false);
   const [manualLinkSource, setManualLinkSource] = useState<{ table: string; column: string } | null>(null);
-  const [manualLinkTarget, setManualLinkTarget] = useState<{ table: string; column: string } | null>(null);
+  const [showRuleFailureModal, setShowRuleFailureModal] = useState(false);
+  const [selectedRuleFailures, setSelectedRuleFailures] = useState<any[]>([]);
+  const [loadingFailures, setLoadingFailures] = useState(false);
+  const [activeRuleTitle, setActiveRuleTitle] = useState('');
 
   // AI States
   const [showAIModal, setShowAIModal] = useState(false);
@@ -202,6 +207,36 @@ function App() {
     } finally {
       setGeneratingAI(false);
     }
+  };
+
+  const deleteRule = async (id: string) => {
+    if (!id || !confirm('Opravdu chcete toto pravidlo smazat?')) return;
+    try {
+      const res = await fetch(`${API_URL}/rules/${id}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        // Update local state to remove the rule block
+        if (validationResult) {
+          setValidationResult({
+            ...validationResult,
+            validationRules: validationResult.validationRules?.filter(r => r.ruleId !== id)
+          });
+        }
+      }
+    } catch (e) { alert('Chyba při mazání.'); }
+  };
+
+  const fetchRuleFailures = async (rule: AIRuleError) => {
+    setActiveRuleTitle(`${rule.table}.${rule.column} (${rule.ruleType})`);
+    setLoadingFailures(true);
+    setShowRuleFailureModal(true);
+    setSelectedRuleFailures([]);
+    try {
+      const res = await fetch(`${API_URL}/rules/${rule.ruleId}/failures`);
+      const data = await res.json();
+      setSelectedRuleFailures(data.failures || []);
+    } catch (e) { console.error(e); }
+    setLoadingFailures(false);
   };
 
   // Load projects
@@ -951,10 +986,26 @@ function App() {
                                 <span className="rule-type-label">{err.ruleType}</span>
                                 <strong>{err.table}.{err.column}</strong>
                               </div>
-                              <span className="error-count" style={{ borderColor: '#ddd' }}>{err.failedCount} vadných řádků</span>
+                              <span
+                                className="error-count"
+                                style={{ borderColor: '#ddd', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                                onClick={() => fetchRuleFailures(err)}
+                                title="Klikněte pro zobrazení záznamů"
+                              >
+                                🔍 {err.failedCount} vadných řádků
+                              </span>
                             </div>
                             <div style={{ padding: '1rem' }}>
-                              <div className="rule-description">{err.description || 'Validace podle AI pravidla.'}</div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
+                                <div className="rule-description" style={{ flex: 1 }}>{err.description || 'Validace podle AI pravidla.'}</div>
+                                <button
+                                  onClick={() => deleteRule(err.ruleId)}
+                                  className="secondary-btn"
+                                  style={{ padding: '4px 8px', fontSize: '0.7rem', color: '#dc2626', borderColor: '#fecaca', background: '#fff' }}
+                                >
+                                  Smazat
+                                </button>
+                              </div>
                               <div style={{ marginTop: '0.75rem' }}>
                                 <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: '#94a3b8', marginBottom: '0.25rem' }}>Ukázka chyb:</div>
                                 <div className="missing-values" style={{ background: '#fafafa', border: '1px solid #eee' }}>
@@ -1452,6 +1503,71 @@ function App() {
                 </div>
               </div>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* Rule Failure Modal */}
+      {showRuleFailureModal && (
+        <div className="modal-overlay" style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center',
+          alignItems: 'center', zIndex: 1100
+        }}>
+          <div style={{
+            background: 'white', padding: '24px', borderRadius: '12px',
+            width: '800px', maxWidth: '95%', maxHeight: '80vh', display: 'flex', flexDirection: 'column',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.2)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+              <h3 style={{ margin: 0 }}>🔍 Detailní výpis chyb: {activeRuleTitle}</h3>
+              <button
+                onClick={() => setShowRuleFailureModal(false)}
+                style={{ border: 'none', background: 'none', fontSize: '1.5rem', cursor: 'pointer' }}
+              >
+                &times;
+              </button>
+            </div>
+
+            <div style={{ overflowY: 'auto', flex: 1, border: '1px solid #eee', borderRadius: '8px' }}>
+              {loadingFailures ? (
+                <div style={{ padding: '2rem', textAlign: 'center' }}>Načítám záznamy...</div>
+              ) : selectedRuleFailures.length === 0 ? (
+                <div style={{ padding: '2rem', textAlign: 'center' }}>Žádné záznamy nebyly nalezeny (nebo se vyskytla chyba).</div>
+              ) : (
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+                  <thead style={{ position: 'sticky', top: 0, background: '#f8fafc' }}>
+                    <tr>
+                      <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Řádek</th>
+                      <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Hodnota</th>
+                      {selectedRuleFailures[0].val_0 !== undefined && (
+                        <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Detaily</th>
+                      )}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {selectedRuleFailures.map((f, idx) => (
+                      <tr key={idx} style={{ background: idx % 2 === 0 ? '#fff' : '#f9fafb' }}>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #edf2f7', color: '#64748b' }}>#{f.rowIndex + 1}</td>
+                        <td style={{ padding: '8px', borderBottom: '1px solid #edf2f7', fontWeight: 600 }}>{f.value || f.primary_val}</td>
+                        {f.val_0 !== undefined && (
+                          <td style={{ padding: '8px', borderBottom: '1px solid #edf2f7', fontSize: '0.8rem' }}>
+                            {Object.entries(f)
+                              .filter(([key]) => key.startsWith('val_'))
+                              .map(([key, val]) => `${key}: ${val}`).join(' | ')
+                            }
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div style={{ marginTop: '1rem', color: '#64748b', fontSize: '0.8rem' }}>
+              Zobrazeno prvních {selectedRuleFailures.length} záznamů.
+            </div>
           </div>
         </div>
       )}

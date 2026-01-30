@@ -403,6 +403,99 @@ app.get('/api/projects/:projectId/tables', async (req, res) => {
     }
 });
 
+// Delete specific validation rule
+app.delete('/api/rules/:id', async (req, res) => {
+    try {
+        await prisma.validationRule.delete({
+            where: { id: req.params.id }
+        });
+        res.json({ success: true });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: (error as Error).message });
+    }
+});
+
+// Get failing records for a rule
+app.get('/api/rules/:id/failures', async (req, res) => {
+    try {
+        const rule = await prisma.validationRule.findUnique({
+            where: { id: req.params.id },
+            include: { column: true }
+        });
+        if (!rule) return res.status(404).json({ error: 'Rule not found' });
+
+        const col = rule.column;
+        const limit = 100;
+        let failures: any[] = [];
+
+        if (rule.type === 'REGEX' && rule.value) {
+            failures = await prisma.$queryRawUnsafe(`
+                SELECT "rowIndex", value 
+                FROM "column_values"
+                WHERE "columnId" = '${col.id}'
+                  AND value != ''
+                  AND NOT (value ~ '${rule.value.replace(/'/g, "''")}')
+                LIMIT ${limit}
+            `);
+        } else if (rule.type === 'NOT_NULL') {
+            failures = await prisma.columnValue.findMany({
+                where: { columnId: col.id, value: '' },
+                take: limit,
+                select: { rowIndex: true, value: true }
+            });
+        } else if (rule.type === 'UNIQUE') {
+            failures = await prisma.$queryRawUnsafe(`
+                SELECT "rowIndex", value 
+                FROM "column_values"
+                WHERE "columnId" = '${col.id}'
+                  AND value IN (
+                    SELECT value FROM "column_values" 
+                    WHERE "columnId" = '${col.id}' 
+                    GROUP BY value HAVING COUNT(*) > 1
+                  )
+                LIMIT ${limit}
+            `);
+        } else if (rule.type === 'MATH_EQUATION' && rule.value) {
+            const colNames = rule.value.match(/\[(.*?)\]/g)?.map(m => m.replace(/[\[\]]/g, '')) || [];
+            const tableCols = await prisma.column.findMany({
+                where: { tableName: col.tableName, projectId: col.projectId }
+            });
+            const nameToId: Record<string, string> = {};
+            tableCols.forEach(tc => nameToId[tc.columnName] = tc.id);
+
+            if (colNames.every(n => nameToId[n])) {
+                let query = `SELECT cv0."rowIndex", cv0.value as primary_val, `;
+                colNames.forEach((n, idx) => {
+                    query += `cv${idx}.value as val_${idx}${idx < colNames.length - 1 ? ', ' : ''}`;
+                });
+                query += ` FROM "column_values" cv0 `;
+                for (let i = 1; i < colNames.length; i++) {
+                    query += `JOIN "column_values" cv${i} ON cv0."rowIndex" = cv${i}."rowIndex" AND cv${i}."columnId" = '${nameToId[colNames[i]]}' `;
+                }
+                query += `WHERE cv0."columnId" = '${nameToId[colNames[0]]}'`;
+
+                let sqlExpr = rule.value.replace(/\[(.*?)\]/g, (match, name) => {
+                    const idx = colNames.indexOf(name);
+                    return `CAST(NULLIF(val_${idx}, '') AS DOUBLE PRECISION)`;
+                }).replace('=', '!=');
+
+                failures = await prisma.$queryRawUnsafe(`
+                     WITH rows AS (${query})
+                     SELECT * FROM rows 
+                     WHERE ABS((${sqlExpr.split('!=')[0]}) - (${sqlExpr.split('!=')[1]})) > 0.1
+                     LIMIT ${limit}
+                 `);
+            }
+        }
+
+        res.json({ failures });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: (error as Error).message });
+    }
+});
+
 // ============================================
 // DATA PROFILING EXPORT (Safe for AI)
 // ============================================
@@ -1176,6 +1269,7 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
 
             if (failedCount > 0) {
                 ruleErrors.push({
+                    ruleId: rule.id,
                     table: col.tableName,
                     column: col.columnName,
                     ruleType: rule.type,
