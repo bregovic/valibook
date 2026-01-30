@@ -435,8 +435,8 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                 if (commonCount > 0) {
                     const matchPercentage = Math.round((commonCount / valuesA.size) * 100);
 
-                    // Only suggest if some overlap (>10%)
-                    if (matchPercentage >= 10) {
+                    // Only suggest if high overlap (>90%)
+                    if (matchPercentage >= 90) {
                         suggestions.push({
                             sourceColumnId: colA.id,
                             sourceColumn: colA.columnName,
