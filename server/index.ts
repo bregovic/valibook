@@ -377,7 +377,7 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
     const { projectId } = req.params;
 
     try {
-        // Get all columns with their unique values
+        // Get all columns
         const columns = await prisma.column.findMany({
             where: { projectId },
             select: {
@@ -386,24 +386,37 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                 columnName: true,
                 tableType: true,
                 isPrimaryKey: true,
-                uniqueCount: true,
-                rowCount: true
+                uniqueCount: true
             }
         });
 
-        // Get unique values for each column (using column_values table)
-        const columnValuesMap = new Map<string, Set<string>>();
+        // For each column, get 10 random non-empty sample values
+        const columnSamplesMap = new Map<string, string[]>();
+        const columnAllValuesMap = new Map<string, Set<string>>();
 
         for (const col of columns) {
-            const values = await prisma.columnValue.findMany({
-                where: { columnId: col.id },
+            // Get 10 random samples
+            const samples = await prisma.$queryRaw<Array<{ value: string }>>`
+                SELECT DISTINCT value 
+                FROM "column_values" 
+                WHERE "columnId" = ${col.id} 
+                  AND value != '' 
+                  AND value IS NOT NULL
+                ORDER BY RANDOM() 
+                LIMIT 10
+            `;
+            columnSamplesMap.set(col.id, samples.map(s => s.value));
+
+            // Get all unique values for this column (for lookup)
+            const allValues = await prisma.columnValue.findMany({
+                where: { columnId: col.id, value: { not: '' } },
                 select: { value: true },
                 distinct: ['value']
             });
-            columnValuesMap.set(col.id, new Set(values.map(v => v.value).filter(v => v !== '')));
+            columnAllValuesMap.set(col.id, new Set(allValues.map(v => v.value)));
         }
 
-        // Find potential links (column A values are subset of column B values)
+        // Find potential links using sample matching
         const suggestions: Array<{
             sourceColumnId: string;
             sourceColumn: string;
@@ -413,47 +426,46 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
             targetTable: string;
             matchPercentage: number;
             commonValues: number;
+            sampleSize: number;
         }> = [];
 
         for (const colA of columns) {
-            const valuesA = columnValuesMap.get(colA.id);
-            if (!valuesA || valuesA.size === 0) continue;
+            const samplesA = columnSamplesMap.get(colA.id);
+            if (!samplesA || samplesA.length === 0) continue;
 
             for (const colB of columns) {
                 if (colA.id === colB.id) continue;
                 if (colA.tableName === colB.tableName) continue; // Same table
 
-                const valuesB = columnValuesMap.get(colB.id);
+                const valuesB = columnAllValuesMap.get(colB.id);
                 if (!valuesB || valuesB.size === 0) continue;
 
-                // Count how many values from A exist in B
-                let commonCount = 0;
-                for (const val of valuesA) {
-                    if (valuesB.has(val)) commonCount++;
+                // Count how many samples from A exist in B
+                let matchCount = 0;
+                for (const sample of samplesA) {
+                    if (valuesB.has(sample)) matchCount++;
                 }
 
-                if (commonCount > 0) {
-                    const matchPercentage = Math.round((commonCount / valuesA.size) * 100);
-
-                    // Only suggest if high overlap (>90%)
-                    if (matchPercentage >= 90) {
-                        suggestions.push({
-                            sourceColumnId: colA.id,
-                            sourceColumn: colA.columnName,
-                            sourceTable: colA.tableName,
-                            targetColumnId: colB.id,
-                            targetColumn: colB.columnName,
-                            targetTable: colB.tableName,
-                            matchPercentage,
-                            commonValues: commonCount
-                        });
-                    }
+                // If at least 3 samples match, suggest link
+                if (matchCount >= 3) {
+                    const matchPercentage = Math.round((matchCount / samplesA.length) * 100);
+                    suggestions.push({
+                        sourceColumnId: colA.id,
+                        sourceColumn: colA.columnName,
+                        sourceTable: colA.tableName,
+                        targetColumnId: colB.id,
+                        targetColumn: colB.columnName,
+                        targetTable: colB.tableName,
+                        matchPercentage,
+                        commonValues: matchCount,
+                        sampleSize: samplesA.length
+                    });
                 }
             }
         }
 
-        // Sort by match percentage (highest first)
-        suggestions.sort((a, b) => b.matchPercentage - a.matchPercentage);
+        // Sort by match count (highest first)
+        suggestions.sort((a, b) => b.commonValues - a.commonValues || b.matchPercentage - a.matchPercentage);
 
         res.json({
             success: true,
