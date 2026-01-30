@@ -158,28 +158,46 @@ function App() {
 
   // Generate Rules Logic
   const generateAIRules = async () => {
-    if (!selectedProject) return;
+    if (!selectedProject || tables.length === 0) return;
     setGeneratingAI(true);
-    setAiResult('Analyzuji strukturu dat...');
+    setAiResult('Příprava analýzy...');
+
     try {
-      const res = await fetch(`${API_URL}/projects/${selectedProject.id}/ai-suggest-rules`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ apiKey: '', password: aiPassword }) // Backend will use stored key
-      });
-      const data = await res.json();
-      if (data.success) {
-        setAiResult(`✅ Úspěch! Vygenerováno ${data.rules.length} pravidel.`);
-        setTimeout(() => {
-          setShowAIModal(false);
-          setAiResult('');
-          alert('Pravidla byla vygenerována. Spusťte prosím VALIDACI pro kontrolu.');
-        }, 2000);
-      } else {
-        setAiResult(`❌ Chyba: ${data.error || 'Neznámá chyba'}`);
+      const tableNames = tables.map(t => t.tableName);
+      const BATCH_SIZE = 5;
+      let totalCreated = 0;
+
+      for (let i = 0; i < tableNames.length; i += BATCH_SIZE) {
+        const subset = tableNames.slice(i, i + BATCH_SIZE);
+        setAiResult(`Analyzuji tabulky ${i + 1} až ${Math.min(i + BATCH_SIZE, tableNames.length)} z ${tableNames.length}...`);
+
+        const res = await fetch(`${API_URL}/projects/${selectedProject.id}/ai-suggest-rules`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            password: aiPassword,
+            subsetTableNames: subset
+          })
+        });
+
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.error || `Chyba při zpracování dávky ${i / BATCH_SIZE + 1}`);
+        }
+
+        const data = await res.json();
+        totalCreated += data.count || 0;
       }
+
+      setAiResult(`✅ Úspěch! Vygenerováno celkem ${totalCreated} pravidel.`);
+      setTimeout(() => {
+        setShowAIModal(false);
+        setAiResult('');
+        alert(`Pravidla byla vygenerována (${totalCreated}). Spusťte prosím VALIDACI pro kontrolu.`);
+      }, 3000);
+
     } catch (err) {
-      setAiResult(`❌ Chyba sítě: ${(err as Error).message}`);
+      setAiResult(`❌ Chyba: ${(err as Error).message}`);
     } finally {
       setGeneratingAI(false);
     }

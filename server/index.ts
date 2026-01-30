@@ -504,16 +504,21 @@ app.post('/api/projects/:projectId/ai-suggest-rules', async (req, res) => {
     }
 
     try {
-        // 2. Generate Profile (Reuse logic or call internal function)
+        const { subsetTableNames } = req.body;
+
+        // 2. Generate Profile
         const columns = await prisma.column.findMany({
-            where: { projectId },
+            where: {
+                projectId,
+                ...(subsetTableNames && { tableName: { in: subsetTableNames } })
+            },
             orderBy: [{ tableName: 'asc' }, { columnIndex: 'asc' }]
         });
 
         // Simplified profile for AI token limits
         const tablesProfile: Record<string, any[]> = {};
-        const columnIdMap: Record<string, string> = {}; // Name -> ID mapping
-        const idToNameMap: Record<string, string> = {}; // ID -> Name for link resolution
+        const columnIdMap: Record<string, string> = {};
+        const idToNameMap: Record<string, string> = {};
 
         // First pass: Build ID to Name map
         for (const col of columns) {
@@ -522,16 +527,12 @@ app.post('/api/projects/:projectId/ai-suggest-rules', async (req, res) => {
 
         // Second pass: Build profile
         for (const col of columns) {
-            // IGNORE EMPTY COLUMNS: If rowCount exists and equals nullCount, it's an empty column
             if (col.rowCount && col.nullCount === col.rowCount) continue;
-
             if (!tablesProfile[col.tableName]) tablesProfile[col.tableName] = [];
 
-            // Store ID for later mapping
             const key = `${col.tableName}.${col.columnName}`;
             columnIdMap[key] = col.id;
 
-            // TRUNCATE SAMPLES to avoid huge requests
             const rawSamples = (col.sampleValues as string[]) || [];
             const safeSamples = rawSamples.slice(0, 3).map(s => String(s).substring(0, 100));
 
@@ -546,90 +547,76 @@ app.post('/api/projects/:projectId/ai-suggest-rules', async (req, res) => {
             });
         }
 
-        // 3. Construct and Call OpenAI in chunks of tables
-        const tableNames = Object.keys(tablesProfile);
-        const CHUNK_SIZE = 10;
-        const allSuggestedRules = [];
-
-        console.log(`Starting AI Rule Suggestion for ${tableNames.length} tables in chunks of ${CHUNK_SIZE}...`);
-
-        for (let i = 0; i < tableNames.length; i += CHUNK_SIZE) {
-            const chunkNames = tableNames.slice(i, i + CHUNK_SIZE);
-            const chunkProfile: Record<string, any> = {};
-            chunkNames.forEach(name => { chunkProfile[name] = tablesProfile[name]; });
-
-            console.log(`Processing chunk ${Math.floor(i / CHUNK_SIZE) + 1}/${Math.ceil(tableNames.length / CHUNK_SIZE)} (${chunkNames.join(', ')})`);
-
-            const prompt = `
-                Analyze the database schema below and suggest validation rules.
-                SCHEMA: ${JSON.stringify(chunkProfile)}
-
-                INSTRUCTIONS:
-                - Focus: VAT, Emails, Phone, IDs, Required fields, Amounts, Currencies, Dates.
-                - Rules: REGEX, NOT_NULL, UNIQUE, MATH_EQUATION (e.g. A*B=C), CURRENCY_CONSISTENCY (ISO codes).
-                - Output ONLY valid JSON array.
-
-                FORMAT:
-                [{"table":"T","column":"C","type":"REGEX","value":"...","description":"...","severity":"ERROR"}]
-            `;
-
-            const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${finalApiKey}`
-                },
-                body: JSON.stringify({
-                    model: "gpt-4o-mini",
-                    messages: [
-                        { role: "system", content: "You are a Data Quality assistant. Output JSON array only." },
-                        { role: "user", content: prompt }
-                    ],
-                    temperature: 0.1
-                })
-            });
-
-            if (!aiRes.ok) {
-                const errText = await aiRes.text();
-                console.error(`OpenAI Error in chunk: ${errText}`);
-                continue; // Try next chunk
-            }
-
-            const aiData = await aiRes.json();
-            let content = aiData.choices[0].message.content;
-            content = content.replace(/```json/g, '').replace(/```/g, '').trim();
-
-            try {
-                const suggestedRules = JSON.parse(content);
-                if (Array.isArray(suggestedRules)) {
-                    allSuggestedRules.push(...suggestedRules);
-                }
-            } catch (e) {
-                console.error("Failed to parse AI response chunk", e);
-            }
+        // 3. Call OpenAI for this (potentially pre-chunked) set
+        const tableNamesToProcess = Object.keys(tablesProfile);
+        if (tableNamesToProcess.length === 0) {
+            return res.json({ success: true, rules: [] });
         }
 
-        // 4. Save Rules to DB
-        const savedRules = [];
-        for (const rule of allSuggestedRules) {
+        console.log(`Processing AI Rule Suggestion for: ${tableNamesToProcess.join(', ')}`);
+
+        const prompt = `
+            Analyze schema and suggest validation rules.
+            SCHEMA: ${JSON.stringify(tablesProfile)}
+            INSTRUCTIONS: VAT, Emails, Phone, IDs, Required, Amounts, Currencies, Dates.
+            Rules: REGES, NOT_NULL, UNIQUE, MATH_EQUATION (A*B=C), CURRENCY_CONSISTENCY.
+            Output ONLY valid JSON array.
+            FORMAT: [{"table":"T","column":"C","type":"REGEX","value":"...","description":"...","severity":"ERROR"}]
+        `;
+
+        const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${finalApiKey}`
+            },
+            body: JSON.stringify({
+                model: "gpt-4o-mini",
+                messages: [
+                    { role: "system", content: "You are a Data Quality assistant. Output JSON array only." },
+                    { role: "user", content: prompt }
+                ],
+                temperature: 0.1
+            })
+        });
+
+        if (!aiRes.ok) {
+            const errText = await aiRes.text();
+            throw new Error(`OpenAI Error: ${errText}`);
+        }
+
+        const aiData = await aiRes.json();
+        let content = aiData.choices[0].message.content;
+        content = content.replace(/```json/g, '').replace(/```/g, '').trim();
+
+        const suggestedRules = JSON.parse(content);
+        const rulesToSave = [];
+
+        for (const rule of suggestedRules) {
             const key = `${rule.table}.${rule.column}`;
             const columnId = columnIdMap[key];
 
             if (columnId) {
-                const saved = await prisma.validationRule.create({
-                    data: {
-                        columnId,
-                        type: rule.type,
-                        value: rule.value || null,
-                        severity: rule.severity || 'ERROR',
-                        description: rule.description
-                    }
+                rulesToSave.push({
+                    columnId,
+                    type: rule.type,
+                    value: rule.value || null,
+                    severity: rule.severity || 'ERROR',
+                    description: rule.description
                 });
-                savedRules.push(saved);
             }
         }
 
-        res.json({ success: true, rules: savedRules });
+        let savedCount = 0;
+        if (rulesToSave.length > 0) {
+            // Use transaction or createMany for speed
+            const result = await prisma.validationRule.createMany({
+                data: rulesToSave
+            });
+            savedCount = result.count;
+        }
+
+        res.json({ success: true, count: savedCount });
 
     } catch (error) {
         console.error(error);
