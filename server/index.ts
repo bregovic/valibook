@@ -395,14 +395,16 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
         const columnAllValuesMap = new Map<string, Set<string>>();
 
         for (const col of columns) {
-            // Get 10 random samples
+            // Get 10 random samples using subquery approach
             const samples = await prisma.$queryRaw<Array<{ value: string }>>`
-                SELECT DISTINCT value 
-                FROM "column_values" 
-                WHERE "columnId" = ${col.id} 
-                  AND value != '' 
-                  AND value IS NOT NULL
-                ORDER BY RANDOM() 
+                SELECT value FROM (
+                    SELECT DISTINCT value 
+                    FROM "column_values" 
+                    WHERE "columnId" = ${col.id} 
+                      AND value != '' 
+                      AND value IS NOT NULL
+                ) AS distinct_vals
+                ORDER BY random() 
                 LIMIT 10
             `;
             columnSamplesMap.set(col.id, samples.map(s => s.value));
