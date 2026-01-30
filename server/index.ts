@@ -386,7 +386,8 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                 columnName: true,
                 tableType: true,
                 isPrimaryKey: true,
-                uniqueCount: true
+                uniqueCount: true,
+                rowCount: true
             }
         });
 
@@ -448,20 +449,26 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                     if (valuesB.has(sample)) matchCount++;
                 }
 
-                // If at least 3 samples match, suggest link
-                if (matchCount >= 3) {
-                    const matchPercentage = Math.round((matchCount / samplesA.length) * 100);
-                    suggestions.push({
-                        sourceColumnId: colA.id,
-                        sourceColumn: colA.columnName,
-                        sourceTable: colA.tableName,
-                        targetColumnId: colB.id,
-                        targetColumn: colB.columnName,
-                        targetTable: colB.tableName,
-                        matchPercentage,
-                        commonValues: matchCount,
-                        sampleSize: samplesA.length
-                    });
+                // Require 100% match (all samples found)
+                if (matchCount === samplesA.length && samplesA.length > 0) {
+                    // Check uniqueness: at least one side must have unique values (no duplicates)
+                    const isSourceUnique = colA.uniqueCount === colA.rowCount && (colA.rowCount ?? 0) > 0;
+                    const isTargetUnique = colB.uniqueCount === colB.rowCount && (colB.rowCount ?? 0) > 0;
+
+                    if (isSourceUnique || isTargetUnique) {
+                        const matchPercentage = 100;
+                        suggestions.push({
+                            sourceColumnId: colA.id,
+                            sourceColumn: colA.columnName,
+                            sourceTable: colA.tableName,
+                            targetColumnId: colB.id,
+                            targetColumn: colB.columnName,
+                            targetTable: colB.tableName,
+                            matchPercentage,
+                            commonValues: matchCount,
+                            sampleSize: samplesA.length
+                        });
+                    }
                 }
             }
         }
