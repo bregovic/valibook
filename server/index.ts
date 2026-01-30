@@ -701,56 +701,60 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
             }
         }
 
-        // 3. FORBIDDEN VALUES CHECK
+        // 3. FORBIDDEN VALUES CHECK - Using bulk query for performance
         const forbiddenColumns = await prisma.column.findMany({
             where: { projectId, tableType: 'FORBIDDEN' }
         });
 
         if (forbiddenColumns.length > 0) {
-            // Find target columns with same name in SOURCE/TARGET tables
+            const forbiddenColIds = forbiddenColumns.map(c => c.id);
+
+            // Get all candidate column IDs
             const candidateColumns = await prisma.column.findMany({
                 where: {
                     projectId,
                     tableType: { in: ['SOURCE', 'TARGET'] }
                 }
             });
+            const candidateColIds = candidateColumns.map(c => c.id);
 
-            for (const fCol of forbiddenColumns) {
-                // Only check columns with SAME NAME (case insensitive) for performance
-                const matchingColumns = candidateColumns.filter(
-                    c => c.columnName.toLowerCase() === fCol.columnName.toLowerCase()
-                );
+            if (candidateColIds.length > 0 && forbiddenColIds.length > 0) {
+                // Single bulk query: find ALL intersections between forbidden and candidate columns
+                const intersections = await prisma.$queryRaw<Array<{
+                    forbidden_col_id: string;
+                    target_col_id: string;
+                    match_count: bigint;
+                    sample_values: string;
+                }>>`
+                    SELECT 
+                        f."columnId" as forbidden_col_id,
+                        t."columnId" as target_col_id,
+                        COUNT(*) as match_count,
+                        STRING_AGG(f.value, ', ' ORDER BY f.value) as sample_values
+                    FROM "column_values" f
+                    JOIN "column_values" t ON f.value = t.value
+                    WHERE f."columnId" = ANY(${forbiddenColIds}::text[])
+                      AND t."columnId" = ANY(${candidateColIds}::text[])
+                      AND f."columnId" != t."columnId"
+                    GROUP BY f."columnId", t."columnId"
+                    HAVING COUNT(*) > 0
+                `;
 
-                for (const tCol of matchingColumns) {
-                    // Skip if same table
-                    if (tCol.tableName === fCol.tableName) continue;
+                // Process results
+                for (const row of intersections) {
+                    const fCol = forbiddenColumns.find(c => c.id === row.forbidden_col_id);
+                    const tCol = candidateColumns.find(c => c.id === row.target_col_id);
 
-                    // Check intersection
-                    const intersection = await prisma.$queryRaw<Array<{ value: string }>>`
-                        SELECT v1.value 
-                        FROM "column_values" v1
-                        JOIN "column_values" v2 ON v1.value = v2.value
-                        WHERE v1."columnId" = ${tCol.id}
-                          AND v2."columnId" = ${fCol.id}
-                        LIMIT 11
-                     `;
-
-                    if (intersection.length > 0) {
-                        const countRes = await prisma.$queryRaw<Array<{ count: bigint }>>`
-                            SELECT COUNT(*) as count
-                            FROM "column_values" v1
-                            JOIN "column_values" v2 ON v1.value = v2.value
-                            WHERE v1."columnId" = ${tCol.id}
-                              AND v2."columnId" = ${fCol.id}
-                        `;
-                        const failedCount = Number(countRes[0].count);
+                    if (fCol && tCol && fCol.tableName !== tCol.tableName) {
+                        const failedCount = Number(row.match_count);
+                        const sampleValues = row.sample_values.split(', ').slice(0, 10);
 
                         forbiddenErrors.push({
                             forbiddenTable: fCol.tableName,
                             forbiddenColumn: fCol.columnName,
                             targetTable: tCol.tableName,
                             column: tCol.columnName,
-                            foundValues: intersection.slice(0, 10).map(v => v.value),
+                            foundValues: sampleValues,
                             count: failedCount
                         });
 
@@ -762,7 +766,6 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
                             failed: failedCount
                         });
                     }
-                    // Note: We don't add OK checks for every column combination - too many
                 }
             }
         }
