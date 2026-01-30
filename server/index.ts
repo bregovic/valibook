@@ -449,9 +449,9 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                     if (valuesB.has(sample)) matchCount++;
                 }
 
-                // Require 100% match (all samples found)
-                if (matchCount === samplesA.length && samplesA.length > 0) {
-                    // Check uniqueness: at least one side must have unique values (no duplicates)
+                // Require 100% match AND minimum 3 samples
+                if (matchCount === samplesA.length && samplesA.length >= 3) {
+                    // Check uniqueness: at least one side must have ALL values unique (no duplicates at all)
                     const isSourceUnique = colA.uniqueCount === colA.rowCount && (colA.rowCount ?? 0) > 0;
                     const isTargetUnique = colB.uniqueCount === colB.rowCount && (colB.rowCount ?? 0) > 0;
 
