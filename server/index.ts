@@ -435,8 +435,8 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                 if (commonCount > 0) {
                     const matchPercentage = Math.round((commonCount / valuesA.size) * 100);
 
-                    // Only suggest if significant overlap (>50%)
-                    if (matchPercentage >= 50) {
+                    // Only suggest if some overlap (>10%)
+                    if (matchPercentage >= 10) {
                         suggestions.push({
                             sourceColumnId: colA.id,
                             sourceColumn: colA.columnName,
@@ -457,7 +457,7 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
 
         res.json({
             success: true,
-            suggestions: suggestions.slice(0, 20) // Limit to top 20
+            suggestions: suggestions.slice(0, 100) // Limit to top 100
         });
 
     } catch (error) {
@@ -666,10 +666,11 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
             });
 
             for (const fCol of forbiddenColumns) {
-                // Determine Matching Columns (Case Insensitive)
-                const targets = candidateColumns.filter(c => c.columnName.toLowerCase() === fCol.columnName.toLowerCase());
+                // Check ALL columns in SOURCE/TARGET tables (not just matching names)
+                for (const tCol of candidateColumns) {
+                    // Skip if same table
+                    if (tCol.tableName === fCol.tableName) continue;
 
-                for (const tCol of targets) {
                     // Check intersection
                     const intersection = await prisma.$queryRaw<Array<{ value: string }>>`
                         SELECT v1.value 
@@ -692,6 +693,7 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
 
                         forbiddenErrors.push({
                             forbiddenTable: fCol.tableName,
+                            forbiddenColumn: fCol.columnName,
                             targetTable: tCol.tableName,
                             column: tCol.columnName,
                             foundValues: intersection.slice(0, 10).map(v => v.value),
@@ -700,20 +702,13 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
 
                         allChecks.push({
                             type: 'ZAKÁZANÉ',
-                            label: `${tCol.tableName}.${tCol.columnName} (vs ${fCol.tableName})`,
+                            label: `${tCol.tableName}.${tCol.columnName} obsahuje hodnoty z ${fCol.tableName}.${fCol.columnName}`,
                             status: 'ERROR',
                             checked: 0,
                             failed: failedCount
                         });
-                    } else {
-                        allChecks.push({
-                            type: 'ZAKÁZANÉ',
-                            label: `${tCol.tableName}.${tCol.columnName} (vs ${fCol.tableName})`,
-                            status: 'OK',
-                            checked: 0,
-                            failed: 0
-                        });
                     }
+                    // Note: We don't add OK checks for every column combination - too many
                 }
             }
         }
@@ -762,7 +757,7 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
             if (forbiddenErrors.length > 0) {
                 protocol += `--- ZAKÁZANÉ HODNOTY ---\n`;
                 forbiddenErrors.forEach(e => {
-                    protocol += `- ${e.targetTable}.${e.column} obsahuje ${e.count} zakázaných hodnot (dle ${e.forbiddenTable}): ${e.foundValues.join(', ')}...\n`;
+                    protocol += `- ${e.targetTable}.${e.column} obsahuje ${e.count} zakázaných hodnot z ${e.forbiddenTable}.${e.forbiddenColumn}: ${e.foundValues.join(', ')}...\n`;
                 });
                 protocol += `\n`;
             }
