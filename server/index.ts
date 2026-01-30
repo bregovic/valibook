@@ -191,9 +191,9 @@ app.post('/api/projects/:projectId/upload', upload.single('file'), async (req, r
             const uniqueValues = [...new Set(nonEmptyValues)];
             const nullCount = allValues.filter(v => v === '').length;
 
-            // Get 10 random sample values
+            // Get 100 random sample values for better detection
             const shuffled = [...uniqueValues].sort(() => 0.5 - Math.random());
-            const sampleValues = shuffled.slice(0, 10);
+            const sampleValues = shuffled.slice(0, 100);
 
             // Create column record
             const column = await prisma.column.create({
@@ -406,7 +406,7 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                       AND value IS NOT NULL
                 ) AS distinct_vals
                 ORDER BY random() 
-                LIMIT 10
+                LIMIT 100
             `;
             columnSamplesMap.set(col.id, samples.map(s => s.value));
 
@@ -456,9 +456,9 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                     if (valuesB.has(sample)) matchCount++;
                 }
 
-                // Require 80% match AND minimum 3 samples
+                // Require 80% match AND minimum 5 samples (more strict with larger sample size)
                 const matchPercentage = Math.round((matchCount / samplesA.length) * 100);
-                if (matchPercentage >= 80 && matchCount >= 3) {
+                if (matchPercentage >= 80 && matchCount >= 5) {
                     // Check uniqueness: at least one side must have 90%+ unique values
                     const sourceUniqueRatio = (colA.uniqueCount ?? 0) / Math.max(colA.rowCount ?? 1, 1);
                     const targetUniqueRatio = (colB.uniqueCount ?? 0) / Math.max(colB.rowCount ?? 1, 1);
