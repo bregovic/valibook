@@ -520,22 +520,52 @@ function App() {
                   </div>
 
                   {tables.length > 0 && (
-                    <>
-                      <button
-                        className="detect-btn"
-                        onClick={detectLinks}
-                        disabled={detecting}
-                      >
-                        {detecting ? '🔍 Hledám...' : '🔍 Najít vazby'}
-                      </button>
-                      <button
-                        className="validate-btn"
-                        onClick={validateProject}
-                        disabled={validating}
-                      >
-                        {validating ? '⏳ Validuji...' : '✓ Validovat'}
-                      </button>
-                    </>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                      <div style={{ display: 'flex', gap: '10px' }}>
+                        <button
+                          className="detect-btn"
+                          onClick={detectLinks}
+                          disabled={detecting}
+                        >
+                          {detecting ? '🔍 Hledám...' : '🔍 Najít vazby'}
+                        </button>
+                        <button
+                          className="validate-btn"
+                          onClick={validateProject}
+                          disabled={validating}
+                        >
+                          {validating ? '⏳ Validuji...' : '✓ Validovat'}
+                        </button>
+                      </div>
+                      {(detecting || validating) && (
+                        <div style={{ width: '100%', maxWidth: '300px' }}>
+                          <div style={{
+                            fontSize: '0.8rem',
+                            color: '#666',
+                            marginBottom: '4px'
+                          }}>
+                            {detecting && 'Analyzuji vzorky dat...'}
+                            {validating && 'Kontroluji integritu a zakázané hodnoty...'}
+                          </div>
+                          <div style={{
+                            width: '100%',
+                            height: '6px',
+                            background: '#e5e7eb',
+                            borderRadius: '3px',
+                            overflow: 'hidden'
+                          }}>
+                            <div style={{
+                              width: '30%',
+                              height: '100%',
+                              background: 'linear-gradient(90deg, #3b82f6, #8b5cf6, #3b82f6)',
+                              backgroundSize: '200% 100%',
+                              animation: 'shimmer 1.5s infinite linear',
+                              borderRadius: '3px'
+                            }}></div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
