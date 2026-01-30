@@ -717,36 +717,40 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
 
             // Process each forbidden column one by one to prevent timeout
             for (const fCol of forbiddenColumns) {
-                console.log(`[Forbidden Check] Processing: ${fCol.tableName}.${fCol.columnName}`);
+                // Get count of forbidden values for logging
+                const forbiddenValueCount = await prisma.columnValue.count({
+                    where: { columnId: fCol.id, value: { not: '' } }
+                });
+                console.log(`[Forbidden Check] Processing: ${fCol.tableName}.${fCol.columnName} (${forbiddenValueCount} values)`);
 
                 // For each forbidden column, check against ALL candidate columns
                 for (const tCol of candidateColumns) {
-                    // Skip if same table (forbidden values in same table don't make sense)
+                    // Skip if same table
                     if (fCol.tableName === tCol.tableName) continue;
 
-                    // Find intersection between this forbidden column and this candidate column
+                    // Find intersection with normalization (LOWER + TRIM)
                     const intersection = await prisma.$queryRaw<Array<{
                         match_count: bigint;
                         sample_values: string;
                     }>>`
                         WITH matched AS (
-                            SELECT f.value
+                            SELECT f_raw.value as val
                             FROM (
-                                SELECT DISTINCT f.value
+                                SELECT DISTINCT LOWER(TRIM(f.value)) as norm_val, f.value
                                 FROM "column_values" f
                                 WHERE f."columnId" = ${fCol.id}
                                   AND f.value != ''
-                            ) f
+                            ) f_raw
                             JOIN (
-                                SELECT DISTINCT t.value
+                                SELECT DISTINCT LOWER(TRIM(t.value)) as norm_val
                                 FROM "column_values" t
                                 WHERE t."columnId" = ${tCol.id}
                                   AND t.value != ''
-                            ) t ON f.value = t.value
+                            ) t_raw ON f_raw.norm_val = t_raw.norm_val
                         )
                         SELECT 
                             (SELECT COUNT(*) FROM matched) as match_count,
-                            (SELECT STRING_AGG(value, ', ') FROM (SELECT value FROM matched ORDER BY value LIMIT 10) sub) as sample_values
+                            (SELECT STRING_AGG(val, ', ') FROM (SELECT val FROM matched ORDER BY val LIMIT 10) sub) as sample_values
                     `;
 
                     if (intersection.length > 0 && Number(intersection[0].match_count) > 0) {
