@@ -513,8 +513,18 @@ app.post('/api/projects/:projectId/ai-suggest-rules', async (req, res) => {
         // Simplified profile for AI token limits
         const tablesProfile: Record<string, any[]> = {};
         const columnIdMap: Record<string, string> = {}; // Name -> ID mapping
+        const idToNameMap: Record<string, string> = {}; // ID -> Name for link resolution
 
+        // First pass: Build ID to Name map
         for (const col of columns) {
+            idToNameMap[col.id] = `${col.tableName}.${col.columnName}`;
+        }
+
+        // Second pass: Build profile
+        for (const col of columns) {
+            // IGNORE EMPTY COLUMNS: If rowCount exists and equals nullCount, it's an empty column
+            if (col.rowCount && col.nullCount === col.rowCount) continue;
+
             if (!tablesProfile[col.tableName]) tablesProfile[col.tableName] = [];
 
             // Store ID for later mapping
@@ -523,13 +533,14 @@ app.post('/api/projects/:projectId/ai-suggest-rules', async (req, res) => {
 
             tablesProfile[col.tableName].push({
                 column: col.columnName,
-                // Only send relevant stats to save likely tokens
                 type: col.dataType || 'STRING',
-                sample: col.sampleValues ? (col.sampleValues as string[]).slice(0, 3) : [], // reduced samples for AI context
+                isPrimaryKey: col.isPrimaryKey,
+                linkedTo: col.linkedToColumnId ? idToNameMap[col.linkedToColumnId] : null,
+                sample: col.sampleValues ? (col.sampleValues as string[]).slice(0, 3) : [],
                 stats: {
                     unique: col.uniqueCount,
                     nulls: col.nullCount,
-                    pattern: col.pattern // e.g. Regex if detected
+                    rowCount: col.rowCount
                 }
             });
         }
@@ -650,10 +661,9 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
 
         // For each column, get 10 random non-empty sample values
         const columnSamplesMap = new Map<string, string[]>();
-        const columnAllValuesMap = new Map<string, Set<string>>();
 
         for (const col of columns) {
-            // Get 10 random samples using subquery approach
+            // Get 20 random samples to increase initial detection accuracy
             const samples = await prisma.$queryRaw<Array<{ value: string }>>`
                 SELECT value FROM (
                     SELECT DISTINCT value 
@@ -663,17 +673,9 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                       AND value IS NOT NULL
                 ) AS distinct_vals
                 ORDER BY random() 
-                LIMIT 100
+                LIMIT 20
             `;
             columnSamplesMap.set(col.id, samples.map(s => s.value));
-
-            // Get all unique values for this column (for lookup)
-            const allValues = await prisma.columnValue.findMany({
-                where: { columnId: col.id, value: { not: '' } },
-                select: { value: true },
-                distinct: ['value']
-            });
-            columnAllValuesMap.set(col.id, new Set(allValues.map(v => v.value)));
         }
 
         // Find potential links using sample matching
@@ -689,9 +691,11 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
             sampleSize: number;
         }> = [];
 
-        // Track seen pairs to avoid duplicates (A->B and B->A)
+        // Track seen pairs to avoid duplicates
         const seenPairs = new Set<string>();
 
+        // Phase 1: Heavy overlap check using samples (optimized)
+        // We only compare columns that haven't been linked yet
         for (const colA of columns) {
             const samplesA = columnSamplesMap.get(colA.id);
             if (!samplesA || samplesA.length === 0) continue;
@@ -700,22 +704,37 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                 if (colA.id === colB.id) continue;
                 if (colA.tableName === colB.tableName) continue; // Same table
 
-                // Skip if we've already seen this pair (in either direction)
                 const pairKey = [colA.id, colB.id].sort().join('|');
                 if (seenPairs.has(pairKey)) continue;
 
-                const valuesB = columnAllValuesMap.get(colB.id);
-                if (!valuesB || valuesB.size === 0) continue;
+                const samplesB = new Set(columnSamplesMap.get(colB.id) || []);
 
-                // Count how many samples from A exist in B
-                let matchCount = 0;
-                for (const sample of samplesA) {
-                    if (valuesB.has(sample)) matchCount++;
-                }
+                // Quick heuristic: Check if names are similar OR samples overlap
+                const namesSimilar = colA.columnName.toLowerCase() === colB.columnName.toLowerCase();
+                let sampleMatchCount = 0;
+                for (const s of samplesA) if (samplesB.has(s)) sampleMatchCount++;
 
-                // Require 80% match AND minimum 5 samples (more strict with larger sample size)
-                const matchPercentage = Math.round((matchCount / samplesA.length) * 100);
-                if (matchPercentage >= 80 && matchCount >= 5) {
+                if (!namesSimilar && sampleMatchCount === 0) continue;
+
+                // Phase 2: Targeted SQL check only for candidates
+                // This replaces loading everything into RAM
+                const overlapRes = await prisma.$queryRaw<Array<{ overlap_count: bigint }>>`
+                    SELECT COUNT(*) as overlap_count
+                    FROM (
+                        SELECT DISTINCT value FROM "column_values" WHERE "columnId" = ${colA.id} AND value != ''
+                        INTERSECT
+                        SELECT DISTINCT value FROM "column_values" WHERE "columnId" = ${colB.id} AND value != ''
+                    ) AS overlap
+                `;
+
+                const commonValues = Number(overlapRes[0].overlap_count);
+                if (commonValues < 5) continue; // Not enough overlap
+
+                // Calculate match percentage based on the smaller table's unique values or just use samples
+                // Let's use simpler logic for AI suggestion:
+                const matchPercentage = Math.round((commonValues / Math.max(colA.uniqueCount || 1, 1)) * 100);
+
+                if (matchPercentage >= 50 || commonValues >= 10 || namesSimilar) {
                     // Check uniqueness: at least one side must have 90%+ unique values
                     const sourceUniqueRatio = (colA.uniqueCount ?? 0) / Math.max(colA.rowCount ?? 1, 1);
                     const targetUniqueRatio = (colB.uniqueCount ?? 0) / Math.max(colB.rowCount ?? 1, 1);
@@ -738,7 +757,7 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                                 targetColumn: colA.columnName,
                                 targetTable: colA.tableName,
                                 matchPercentage,
-                                commonValues: matchCount,
+                                commonValues: commonValues,
                                 sampleSize: samplesA.length
                             });
                         } else {
@@ -750,7 +769,7 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                                 targetColumn: colB.columnName,
                                 targetTable: colB.tableName,
                                 matchPercentage,
-                                commonValues: matchCount,
+                                commonValues: commonValues,
                                 sampleSize: samplesA.length
                             });
                         }
