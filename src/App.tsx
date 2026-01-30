@@ -890,7 +890,7 @@ function App() {
             background: 'white',
             borderRadius: '12px',
             padding: '24px',
-            width: '500px',
+            width: '400px',
             maxWidth: '90vw',
             boxShadow: '0 20px 40px rgba(0,0,0,0.3)'
           }}>
@@ -901,32 +901,30 @@ function App() {
               <label style={{ display: 'block', fontWeight: 500, marginBottom: '6px' }}>
                 Zdrojový sloupec (FK):
               </label>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <select
-                  style={{ flex: 1, padding: '8px' }}
-                  value={manualLinkSource?.table || ''}
-                  onChange={(e) => setManualLinkSource({ table: e.target.value, column: '' })}
-                >
-                  <option value="">-- Vyberte tabulku --</option>
-                  {tables.map(t => (
-                    <option key={t.tableName} value={t.tableName}>{t.tableName}</option>
-                  ))}
-                </select>
-                <select
-                  style={{ flex: 1, padding: '8px' }}
-                  value={manualLinkSource?.column || ''}
-                  onChange={(e) => setManualLinkSource(prev => prev ? { ...prev, column: e.target.value } : null)}
-                  disabled={!manualLinkSource?.table}
-                >
-                  <option value="">-- Vyberte sloupec --</option>
-                  {manualLinkSource?.table && tables
-                    .find(t => t.tableName === manualLinkSource.table)
-                    ?.columns.map(c => (
-                      <option key={c.id} value={c.columnName}>{c.columnName}</option>
-                    ))
-                  }
-                </select>
-              </div>
+              <select
+                style={{ width: '100%', padding: '8px', marginBottom: '8px', boxSizing: 'border-box' }}
+                value={manualLinkSource?.table || ''}
+                onChange={(e) => setManualLinkSource({ table: e.target.value, column: '' })}
+              >
+                <option value="">-- Vyberte tabulku --</option>
+                {tables.map(t => (
+                  <option key={t.tableName} value={t.tableName}>{t.tableName}</option>
+                ))}
+              </select>
+              <select
+                style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                value={manualLinkSource?.column || ''}
+                onChange={(e) => setManualLinkSource(prev => prev ? { ...prev, column: e.target.value } : null)}
+                disabled={!manualLinkSource?.table}
+              >
+                <option value="">-- Vyberte sloupec --</option>
+                {manualLinkSource?.table && tables
+                  .find(t => t.tableName === manualLinkSource.table)
+                  ?.columns.map(c => (
+                    <option key={c.id} value={c.columnName}>{c.columnName}</option>
+                  ))
+                }
+              </select>
             </div>
 
             {/* Target selection */}
@@ -934,32 +932,30 @@ function App() {
               <label style={{ display: 'block', fontWeight: 500, marginBottom: '6px' }}>
                 Cílový sloupec (PK):
               </label>
-              <div style={{ display: 'flex', gap: '8px' }}>
-                <select
-                  style={{ flex: 1, padding: '8px' }}
-                  value={manualLinkTarget?.table || ''}
-                  onChange={(e) => setManualLinkTarget({ table: e.target.value, column: '' })}
-                >
-                  <option value="">-- Vyberte tabulku --</option>
-                  {tables.map(t => (
-                    <option key={t.tableName} value={t.tableName}>{t.tableName}</option>
-                  ))}
-                </select>
-                <select
-                  style={{ flex: 1, padding: '8px' }}
-                  value={manualLinkTarget?.column || ''}
-                  onChange={(e) => setManualLinkTarget(prev => prev ? { ...prev, column: e.target.value } : null)}
-                  disabled={!manualLinkTarget?.table}
-                >
-                  <option value="">-- Vyberte sloupec --</option>
-                  {manualLinkTarget?.table && tables
-                    .find(t => t.tableName === manualLinkTarget.table)
-                    ?.columns.map(c => (
-                      <option key={c.id} value={c.columnName}>{c.columnName}</option>
-                    ))
-                  }
-                </select>
-              </div>
+              <select
+                style={{ width: '100%', padding: '8px', marginBottom: '8px', boxSizing: 'border-box' }}
+                value={manualLinkTarget?.table || ''}
+                onChange={(e) => setManualLinkTarget({ table: e.target.value, column: '' })}
+              >
+                <option value="">-- Vyberte tabulku --</option>
+                {tables.map(t => (
+                  <option key={t.tableName} value={t.tableName}>{t.tableName}</option>
+                ))}
+              </select>
+              <select
+                style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                value={manualLinkTarget?.column || ''}
+                onChange={(e) => setManualLinkTarget(prev => prev ? { ...prev, column: e.target.value } : null)}
+                disabled={!manualLinkTarget?.table}
+              >
+                <option value="">-- Vyberte sloupec --</option>
+                {manualLinkTarget?.table && tables
+                  .find(t => t.tableName === manualLinkTarget.table)
+                  ?.columns.map(c => (
+                    <option key={c.id} value={c.columnName}>{c.columnName}</option>
+                  ))
+                }
+              </select>
             </div>
 
             {/* Actions */}
