@@ -195,6 +195,34 @@ app.post('/api/projects/:projectId/upload', upload.single('file'), async (req, r
             const shuffled = [...uniqueValues].sort(() => 0.5 - Math.random());
             const sampleValues = shuffled.slice(0, 100);
 
+            // Basic Profiling
+            let minLength: number | null = null;
+            let maxLength: number | null = null;
+            let detectedType: string = 'STRING';
+            let pattern: string | null = null;
+
+            if (nonEmptyValues.length > 0) {
+                const lengths = nonEmptyValues.map(v => v.length);
+                minLength = Math.min(...lengths);
+                maxLength = Math.max(...lengths);
+
+                // Detect Type
+                const isNumeric = nonEmptyValues.every(v => !isNaN(Number(v)) && v.trim() !== '');
+                // Simple date detection (very basic)
+                const isDate = nonEmptyValues.every(v => !isNaN(Date.parse(v)) && (v.includes('-') || v.includes('/')) && v.length >= 8);
+
+                if (isNumeric) detectedType = 'NUMBER';
+                else if (isDate) detectedType = 'DATE';
+
+                // Detect common patterns (e.g. VAT)
+                if (detectedType === 'STRING') {
+                    const vatRegex = /^[A-Z]{2}[0-9]+$/;
+                    if (nonEmptyValues.every(v => vatRegex.test(v))) {
+                        pattern = '^[A-Z]{2}[0-9]+$';
+                    }
+                }
+            }
+
             // Create column record
             const column = await prisma.column.create({
                 data: {
@@ -206,7 +234,12 @@ app.post('/api/projects/:projectId/upload', upload.single('file'), async (req, r
                     rowCount,
                     uniqueCount: uniqueValues.length,
                     nullCount,
-                    sampleValues
+                    sampleValues,
+                    // Profiling stats
+                    minLength,
+                    maxLength,
+                    dataType: detectedType,
+                    pattern
                 }
             });
 
@@ -364,6 +397,50 @@ app.get('/api/projects/:projectId/tables', async (req, res) => {
         }
 
         res.json(Object.values(tables));
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: (error as Error).message });
+    }
+});
+
+// ============================================
+// DATA PROFILING EXPORT (Safe for AI)
+// ============================================
+app.get('/api/projects/:projectId/profile', async (req, res) => {
+    const { projectId } = req.params;
+    try {
+        const columns = await prisma.column.findMany({
+            where: { projectId },
+            orderBy: [{ tableName: 'asc' }, { columnIndex: 'asc' }]
+        });
+
+        const profileReport: any = {
+            projectId,
+            generatedAt: new Date().toISOString(),
+            tables: {}
+        };
+
+        // Group by table
+        for (const col of columns) {
+            if (!profileReport.tables[col.tableName]) {
+                profileReport.tables[col.tableName] = [];
+            }
+            profileReport.tables[col.tableName].push({
+                column: col.columnName,
+                type: col.dataType || 'STRING',
+                stats: {
+                    rows: col.rowCount,
+                    unique: col.uniqueCount,
+                    nulls: col.nullCount,
+                    nullRatio: col.rowCount ? (col.nullCount || 0) / col.rowCount : 0,
+                    minLength: col.minLength,
+                    maxLength: col.maxLength,
+                    pattern: col.pattern
+                }
+            });
+        }
+
+        res.json(profileReport);
     } catch (error) {
         console.error(error);
         res.status(500).json({ error: (error as Error).message });

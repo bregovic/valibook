@@ -59,6 +59,12 @@ model Column {
   uniqueCount  Int?      // Počet unikátních hodnot
   nullCount    Int?      // Počet prázdných hodnot
   
+  // AI Profiling Stats
+  minLength    Int?
+  maxLength    Int?
+  pattern      String?   // Dominant regex pattern detected
+  dataType     String?   // 'STRING', 'NUMBER', 'DATE', 'BOOLEAN'
+
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
@@ -75,8 +81,31 @@ model Column {
   // Data tohoto sloupce
   values       ColumnValue[]
 
+  // Rules
+  rules        ValidationRule[]
+
   @@unique([projectId, tableName, columnName])
   @@map("columns")
+}
+
+// ============================================
+// VALIDATION RULES - Pravidla pro sloupce
+// ============================================
+model ValidationRule {
+  id          String   @id @default(cuid())
+  columnId    String
+  
+  type        String   // 'REGEX', 'NOT_NULL', 'UNIQUE', 'RANGE', 'ENUM', 'CUSTOM'
+  value       String?  // The rule parameter (e.g. regex string, min/max)
+  severity    String   @default("ERROR") // 'ERROR', 'WARNING', 'INFO'
+  description String?  // Human readable description (e.g. "Must be 10 digits")
+  
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  column      Column   @relation(fields: [columnId], references: [id], onDelete: Cascade)
+
+  @@map("validation_rules")
 }
 
 // ============================================
