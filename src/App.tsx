@@ -91,6 +91,7 @@ function App() {
   const [detecting, setDetecting] = useState(false);
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
+  const [activeValidationTab, setActiveValidationTab] = useState<'SUMMARY' | 'INTEGRITY' | 'FORBIDDEN' | 'RULES' | 'RECONCILE' | 'PROTOCOL'>('SUMMARY');
   const [showManualLinkModal, setShowManualLinkModal] = useState(false);
   const [manualLinkSource, setManualLinkSource] = useState<{ table: string; column: string } | null>(null);
   const [manualLinkTarget, setManualLinkTarget] = useState<{ table: string; column: string } | null>(null);
@@ -730,68 +731,205 @@ function App() {
               {validationResult && (
                 <div className={`validation-panel ${validationResult.summary.failed > 0 ? 'has-errors' : 'all-passed'}`}>
                   <div className="validation-header">
-                    <h3>
-                      {validationResult.summary.failed > 0 ? '❌ Nalezeny chyby' : '✅ Validace úspěšná'}
-                    </h3>
-                    <div className="validation-summary">
-                      <span className="check-count">Kontrol: {validationResult.summary.totalChecks}</span>
-                      <span className="passed-count">✓ {validationResult.summary.passed}</span>
-                      <span className="failed-count">✗ {validationResult.summary.failed}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                      <span style={{ fontSize: '1.5rem' }}>{validationResult.summary.failed > 0 ? '📊' : '✅'}</span>
+                      <h3 style={{ margin: 0 }}>Výsledky validace</h3>
                     </div>
                     <button className="close-btn" onClick={() => setValidationResult(null)}>×</button>
                   </div>
 
-                  {validationResult.protocol && (
-                    <pre className="validation-protocol">
-                      {validationResult.protocol}
-                    </pre>
-                  )}
+                  {/* Tabs Navigation */}
+                  <div className="validation-tabs">
+                    <button
+                      className={`tab-btn ${activeValidationTab === 'SUMMARY' ? 'active' : ''}`}
+                      onClick={() => setActiveValidationTab('SUMMARY')}
+                    >
+                      🏠 Přehled
+                    </button>
 
-                  {validationResult.errors.length > 0 && (
-                    <div className="validation-errors">
-                      {validationResult.errors.map((err, i) => (
-                        <div key={i} className="error-item">
-                          <div className="error-header">
-                            <strong>{err.fkTable}.{err.fkColumn}</strong>
-                            <span className="arrow">→</span>
-                            <strong>{err.pkTable}.{err.pkColumn}</strong>
-                            <span className="error-count">{err.missingCount} chybějících hodnot</span>
+                    {validationResult.errors.length > 0 && (
+                      <button
+                        className={`tab-btn error ${activeValidationTab === 'INTEGRITY' ? 'active' : ''}`}
+                        onClick={() => setActiveValidationTab('INTEGRITY')}
+                      >
+                        🔗 Integrita <span className="tab-badge">{validationResult.errors.length}</span>
+                      </button>
+                    )}
+
+                    {validationResult.forbidden && validationResult.forbidden.length > 0 && (
+                      <button
+                        className={`tab-btn error ${activeValidationTab === 'FORBIDDEN' ? 'active' : ''}`}
+                        onClick={() => setActiveValidationTab('FORBIDDEN')}
+                      >
+                        ⛔ Zakázané <span className="tab-badge">{validationResult.forbidden.length}</span>
+                      </button>
+                    )}
+
+                    {validationResult.validationRules && validationResult.validationRules.length > 0 && (
+                      <button
+                        className={`tab-btn error ${activeValidationTab === 'RULES' ? 'active' : ''}`}
+                        onClick={() => setActiveValidationTab('RULES')}
+                      >
+                        ✨ AI Pravidla <span className="tab-badge">{validationResult.validationRules.length}</span>
+                      </button>
+                    )}
+
+                    {validationResult.reconciliation && validationResult.reconciliation.length > 0 && (
+                      <button
+                        className={`tab-btn error ${activeValidationTab === 'RECONCILE' ? 'active' : ''}`}
+                        onClick={() => setActiveValidationTab('RECONCILE')}
+                      >
+                        ⚖️ Rekonsiliace <span className="tab-badge">{validationResult.reconciliation.length}</span>
+                      </button>
+                    )}
+
+                    <button
+                      className={`tab-btn ${activeValidationTab === 'PROTOCOL' ? 'active' : ''}`}
+                      onClick={() => setActiveValidationTab('PROTOCOL')}
+                    >
+                      📝 Protokol
+                    </button>
+                  </div>
+
+                  {/* Tab Content */}
+                  <div className="validation-content">
+
+                    {/* 1. SUMMARY / DASHBOARD */}
+                    {activeValidationTab === 'SUMMARY' && (
+                      <div className="validation-dashboard-view">
+                        <div className="validation-dashboard">
+                          <div className="stat-card total">
+                            <span className="stat-value">{validationResult.summary.totalChecks}</span>
+                            <span className="stat-label">Celkem kontrol</span>
                           </div>
-                          <div className="missing-values">
-                            Chybí: {err.missingValues.join(', ')}
-                            {err.missingCount > 10 && ` ... a dalších ${err.missingCount - 10}`}
+                          <div className="stat-card passed">
+                            <span className="stat-value">{validationResult.summary.passed}</span>
+                            <span className="stat-label">Úspěšné</span>
+                          </div>
+                          <div className="stat-card failed">
+                            <span className="stat-value">{validationResult.summary.failed}</span>
+                            <span className="stat-label">Selhalo</span>
+                          </div>
+                          <div className="stat-card">
+                            <span className="stat-value" style={{ color: validationResult.summary.failed === 0 ? '#10b981' : '#f59e0b' }}>
+                              {Math.round((validationResult.summary.passed / (validationResult.summary.totalChecks || 1)) * 100)}%
+                            </span>
+                            <span className="stat-label">Kvalita dat</span>
                           </div>
                         </div>
-                      ))}
-                    </div>
-                  )}
 
-                  {/* Reconciliation Errors */}
-                  {validationResult.reconciliation && validationResult.reconciliation.length > 0 && (
-                    <div className="validation-errors" style={{ marginTop: '1rem' }}>
-                      <h4 style={{ margin: '0 0 0.5rem 0', color: '#d97706' }}>⚠️ Neshody v datech (Reconciliation)</h4>
-                      {validationResult.reconciliation.map((err, i) => (
-                        <div key={i} className="error-item warning">
-                          <div className="error-header">
-                            <strong>{err.sourceTable}.{err.sourceColumn}</strong>
-                            <span className="arrow">≠</span>
-                            <strong>{err.targetTable}.{err.targetColumn}</strong>
-                            <span className="error-count" style={{ background: '#fef3c7', color: '#d97706', borderColor: '#fcd34d' }}>{err.count} neshod</span>
-                          </div>
-                          <div className="missing-values">
-                            <div style={{ marginBottom: '0.5rem', fontWeight: 600, fontSize: '0.75rem' }}>Spojeno přes klíč: {err.joinKey}</div>
-                            <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-                              {err.mismatches.map((m, j) => (
-                                <li key={j} style={{ borderBottom: '1px solid #eee', padding: '2px 0' }}>
-                                  <span style={{ color: '#6b7280' }}>[{m.key}]</span>: <span style={{ color: '#ef4444' }}>"{m.source}"</span> vs <span style={{ color: '#10b981' }}>"{m.target}"</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
+                        <div style={{ background: '#f8fafc', padding: '1.5rem', borderRadius: '12px', border: '1px solid #e2e8f0' }}>
+                          <h4 style={{ marginTop: 0, marginBottom: '0.5rem' }}>Závěrečné shrnutí</h4>
+                          <p style={{ color: '#475569', fontSize: '0.9rem' }}>
+                            {validationResult.summary.failed === 0
+                              ? 'Všechny kontroly proběhly v pořádku. Data jsou konzistentní a připravená k dalšímu zpracování.'
+                              : `Bylo nalezeno ${validationResult.summary.failed} problematických oblastí. Doporučujeme projít jednotlivé záložky a opravit chyby ve zdrojových souborech.`}
+                          </p>
                         </div>
-                      ))}
-                    </div>
-                  )}
+                      </div>
+                    )}
+
+                    {/* 2. INTEGRITY (Foreign Keys) */}
+                    {activeValidationTab === 'INTEGRITY' && (
+                      <div className="validation-errors">
+                        {validationResult.errors.map((err, i) => (
+                          <div key={i} className="error-item">
+                            <div className="error-header">
+                              <strong>{err.fkTable}.{err.fkColumn}</strong>
+                              <span className="arrow">→</span>
+                              <strong>{err.pkTable}.{err.pkColumn}</strong>
+                              <span className="error-count">{err.missingCount} chybějících (sirotků)</span>
+                            </div>
+                            <div className="missing-values">
+                              <div style={{ marginBottom: '0.5rem', fontSize: '0.75rem', color: '#94a3b8' }}>Tyto hodnoty neexistují v číselníku {err.pkTable}:</div>
+                              {err.missingValues.join(', ')}
+                              {err.missingCount > 10 && ` ... a dalších ${err.missingCount - 10}`}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* 3. FORBIDDEN VALUES */}
+                    {activeValidationTab === 'FORBIDDEN' && (
+                      <div className="validation-errors">
+                        {validationResult.forbidden?.map((err, i) => (
+                          <div key={i} className="error-item warning">
+                            <div className="error-header">
+                              <strong>{err.targetTable}.{err.column}</strong>
+                              <span className="arrow">∩</span>
+                              <strong>{err.forbiddenTable}.{err.forbiddenColumn}</strong>
+                              <span className="error-count" style={{ background: '#fef3c7', color: '#d97706', borderColor: '#fcd34d' }}>{err.count} zakázaných hodnot</span>
+                            </div>
+                            <div className="missing-values">
+                              Nalezeny hodnoty z blacklistu: {err.foundValues.join(', ')}
+                              {err.count > 10 && ` ... a dalších ${err.count - 10}`}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* 4. AI RULES */}
+                    {activeValidationTab === 'RULES' && (
+                      <div className="validation-errors">
+                        {validationResult.validationRules?.map((err, i) => (
+                          <div key={i} className="rule-error error-item">
+                            <div className="rule-error-header">
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                <span className="rule-type-label">{err.ruleType}</span>
+                                <strong>{err.table}.{err.column}</strong>
+                              </div>
+                              <span className="error-count" style={{ borderColor: '#ddd' }}>{err.failedCount} vadných řádků</span>
+                            </div>
+                            <div style={{ padding: '1rem' }}>
+                              <div className="rule-description">{err.description || 'Validace podle AI pravidla.'}</div>
+                              <div style={{ marginTop: '0.75rem' }}>
+                                <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: '#94a3b8', marginBottom: '0.25rem' }}>Ukázka chyb:</div>
+                                <div className="missing-values" style={{ background: '#fafafa', border: '1px solid #eee' }}>
+                                  {err.samples?.join(', ') || 'Není k dispozici'}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* 5. RECONCILIATION */}
+                    {activeValidationTab === 'RECONCILE' && (
+                      <div className="validation-errors">
+                        {validationResult.reconciliation?.map((err, i) => (
+                          <div key={i} className="error-item warning">
+                            <div className="error-header">
+                              <strong>{err.sourceTable}.{err.sourceColumn}</strong>
+                              <span className="arrow">≠</span>
+                              <strong>{err.targetTable}.{err.targetColumn}</strong>
+                              <span className="error-count" style={{ background: '#fef3c7', color: '#d97706', borderColor: '#fcd34d' }}>{err.count} neshod</span>
+                            </div>
+                            <div className="missing-values">
+                              <div style={{ marginBottom: '0.5rem', fontWeight: 600, fontSize: '0.75rem' }}>Spojeno přes klíč: {err.joinKey}</div>
+                              <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+                                {err.mismatches.map((m, j) => (
+                                  <li key={j} style={{ borderBottom: '1px solid #eee', padding: '4px 0', fontSize: '0.85rem' }}>
+                                    <span style={{ color: '#64748b' }}>[{m.key}]</span>: <span style={{ color: '#ef4444', textDecoration: 'line-through' }}>"{m.source}"</span> → <span style={{ color: '#10b981', fontWeight: 600 }}>"{m.target}"</span>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* 6. PROTOCOL */}
+                    {activeValidationTab === 'PROTOCOL' && (
+                      <pre className="validation-protocol" style={{ maxHeight: '500px' }}>
+                        {validationResult.protocol}
+                      </pre>
+                    )}
+
+                  </div>
                 </div>
               )}
 

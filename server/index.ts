@@ -536,17 +536,19 @@ app.post('/api/projects/:projectId/ai-suggest-rules', async (req, res) => {
 
         // 3. Construct Prompt
         const prompt = `
-            You are a Data Quality Engineer. Analyze the database schema below and suggest validation rules.
+            You are a Financial Data Auditor and Data Quality Engineer. Analyze the database schema below and suggest validation rules.
             
             SCHEMA:
             ${JSON.stringify(tablesProfile, null, 2)}
 
             INSTRUCTIONS:
-            - Suggest rules to ensure data quality (Integrity, Format, Completeness).
             - Focus on: VAT numbers, Emails, Phone numbers, IDs, Required fields.
-            - If a column has 'nulls: 0', suggest a NOT_NULL rule.
-            - If a column has 'unique' close to row count, suggest UNIQUE rule.
-            - Provide a valid Regex for standard formats (VAT, IBAN, etc).
+            - FINANCIAL FOCUS: Identify columns like Amounts (debit, credit, total), Currencies, Exchange Rates, and Dates.
+            - Suggest special rules for:
+                1. REGEX: Standard formats.
+                2. NOT_NULL / UNIQUE as before.
+                3. MATH_EQUATION: If you see columns like 'Amount', 'Rate', 'Total', suggest a rule: 'Amount * Rate = Total'.
+                4. CURRENCY_CONSISTENCY: Ensure specific tables have valid ISO currency codes.
             - Output ONLY valid JSON array.
 
             OUTPUT FORMAT:
@@ -554,9 +556,9 @@ app.post('/api/projects/:projectId/ai-suggest-rules', async (req, res) => {
                 {
                     "table": "TableName",
                     "column": "ColumnName",
-                    "type": "REGEX" | "NOT_NULL" | "UNIQUE",
-                    "value": "^[A-Z]{2}\\d+$" (for regex only),
-                    "description": "VAT number must be valid format",
+                    "type": "REGEX" | "NOT_NULL" | "UNIQUE" | "MATH_EQUATION" | "CURRENCY_CONSISTENCY",
+                    "value": "^[A-Z]{3}$" (for currency regex) or "[column1] * [column2] = [column3]" (for MATH_EQUATION),
+                    "description": "Short explanation in Czech",
                     "severity": "ERROR" | "WARNING"
                 }
             ]
@@ -1100,6 +1102,67 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
                     failedCount = col.rowCount! - col.uniqueCount!; // Rough estimate of issues
                     sampleFailures = duplicates.map(d => `${d.value} (${d.count}x)`);
                 }
+            } else if (rule.type === 'MATH_EQUATION' && rule.value) {
+                // Rule format: "[ColA] * [ColB] = [ColC]"
+                try {
+                    const parts = rule.value.split('=');
+                    const leftSide = parts[0].trim();
+                    const rightSide = parts[1].trim();
+
+                    // Simple parser for [Col] operators
+                    const colNames = rule.value.match(/\[(.*?)\]/g)?.map(m => m.replace(/[\[\]]/g, '')) || [];
+
+                    // Find column IDs for all referenced columns in this table
+                    const tableCols = await prisma.column.findMany({
+                        where: { tableName: col.tableName, projectId }
+                    });
+
+                    const nameToId: Record<string, string> = {};
+                    tableCols.forEach(tc => nameToId[tc.columnName] = tc.id);
+
+                    // We need at least the columns mentioned
+                    const missing = colNames.filter(n => !nameToId[n]);
+                    if (missing.length === 0) {
+                        // Construct complex SQL to join values for the same row
+                        // Dynamically build a row-joiner
+                        let query = `SELECT cv0."rowIndex", `;
+                        colNames.forEach((n, idx) => {
+                            query += `CAST(NULLIF(cv${idx}.value, '') AS DOUBLE PRECISION) as val${idx}${idx < colNames.length - 1 ? ', ' : ''}`;
+                        });
+                        query += ` FROM "column_values" cv0 `;
+                        for (let i = 1; i < colNames.length; i++) {
+                            query += `JOIN "column_values" cv${i} ON cv0."rowIndex" = cv${i}."rowIndex" AND cv${i}."columnId" = '${nameToId[colNames[i]]}' `;
+                        }
+                        query += `WHERE cv0."columnId" = '${nameToId[colNames[0]]}'`;
+
+                        // Parse expression into SQL
+                        // replace [Name] with valX
+                        let sqlExpr = rule.value.replace(/\[(.*?)\]/g, (match, name) => {
+                            const idx = colNames.indexOf(name);
+                            return `val${idx}`;
+                        }).replace('=', '!='); // We want to FIND mismatches
+
+                        // Handle potential division by zero or large precision errors
+                        const mismatches = await prisma.$queryRawUnsafe<any[]>(`
+                            WITH rows AS (${query})
+                            SELECT * FROM rows 
+                            WHERE ABS((${sqlExpr.split('!=')[0]}) - (${sqlExpr.split('!=')[1]})) > 0.1
+                            LIMIT 10
+                        `);
+
+                        if (mismatches.length > 0) {
+                            const countRes = await prisma.$queryRawUnsafe<any[]>(`
+                                WITH rows AS (${query})
+                                SELECT COUNT(*) as count FROM rows 
+                                WHERE ABS((${sqlExpr.split('!=')[0]}) - (${sqlExpr.split('!=')[1]})) > 0.1
+                             `);
+                            failedCount = Number(countRes[0].count);
+                            sampleFailures = mismatches.map(m => `Řádek ${m.rowIndex + 1}: Nesedí výpočet`);
+                        }
+                    }
+                } catch (err) {
+                    console.error('Math validation failed:', err);
+                }
             }
 
             if (failedCount > 0) {
@@ -1132,13 +1195,46 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
         }
 
 
+        // 5. FINANCIAL ANALYSIS (Auto-detect amounts and currencies)
+        const financialSummary: any[] = [];
+        const potentialAmountCols = fkColumns.filter((c: any) =>
+            c.columnName.toLowerCase().includes('amount') ||
+            c.columnName.toLowerCase().includes('čás') ||
+            c.columnName.toLowerCase().includes('debit') ||
+            c.columnName.toLowerCase().includes('credit') ||
+            c.columnName.toLowerCase().includes('total')
+        );
+
+        for (const fcol of potentialAmountCols) {
+            try {
+                const sumRes = await prisma.$queryRawUnsafe<Array<{ total: number }>>(`
+                    SELECT SUM(CASE WHEN value ~ '^-?\\d*\\.?\\d+$' THEN CAST(value AS DOUBLE PRECISION) ELSE 0 END) as total 
+                    FROM "column_values" 
+                    WHERE "columnId" = '${fcol.id}'
+                `);
+                financialSummary.push({
+                    table: fcol.tableName,
+                    column: fcol.columnName,
+                    total: sumRes[0].total || 0
+                });
+            } catch (e) { /* ignore cast errors */ }
+        }
+
         // Generate Protocol
         const totalFailed = allChecks.filter(c => c.status === 'ERROR').length;
-        const totalPassed = allChecks.filter(c => c.status === 'OK').length;
+        const totalPassed = allChecks.length - totalFailed;
 
         let protocol = `PROTOKOL O VALIDACI\n=====================\nDatum: ${new Date().toLocaleString('cs-CZ')}\nStav: ${totalFailed > 0 ? 'S CHYBAMI' : 'ÚSPĚŠNÉ'}\n${'-'.repeat(40)}\nCelkem kontrol: ${allChecks.length}\nÚspěšné: ${totalPassed}\nSelhalo: ${totalFailed}\n\n`;
 
-        protocol += `[METODIKA VALIDACE]\n1. INTEGRITA (Foreign Key)\n   - Metoda: SQL NOT EXISTS query.\n   - Princip: Hledá hodnoty ve zdrojovém sloupci, které nemají odpovídající záznam v cílové (master) tabulce.\n2. REKONSILIACE (Shoda dat)\n   - Metoda: SQL Comparison přes JOIN klíč.\n   - Princip: Spojí řádky tabulek přes definovaný klíč a porovnává hodnoty v ostatních sloupcích.\n3. ZAKÁZANÉ HODNOTY (Blacklist)\n   - Metoda: SQL INTERSECT (case-insensitive).\n4. PRAVIDLA (AI/Custom)\n   - Regex, NotNull, Unique kontroly.\n\n`;
+        if (financialSummary.length > 0) {
+            protocol += `[FINANČNÍ PŘEHLED (SUMARIZACE)]\n`;
+            financialSummary.forEach(f => {
+                protocol += `- ${f.table}.${f.column}: ${f.total.toLocaleString('cs-CZ', { minimumFractionDigits: 2 })}\n`;
+            });
+            protocol += `\n`;
+        }
+
+        protocol += `[METODIKA VALIDACE]\n1. INTEGRITA (Foreign Key)\n   - Metoda: SQL NOT EXISTS query.\n   - Princip: Hledá hodnoty ve zdrojovém sloupci, které nemají odpovídající záznam v cílové (master) tabulce.\n2. REKONSILIACE (Shoda dat)\n   - Metoda: SQL Comparison přes JOIN klíč.\n   - Princip: Spojí řádky tabulek přes definovaný klíč a porovnává hodnoty v ostatních sloupcích.\n3. ZAKÁZANÉ HODNOTY (Blacklist)\n   - Metoda: SQL INTERSECT (case-insensitive).\n4. PRAVIDLA (AI/Custom/FINANCIAL)\n   - Regex, NotNull, Unique, Math Equations.\n\n`;
 
         protocol += `[DETAILNÍ VÝPIS VŠECH KONTROL]\n`;
         allChecks.forEach(check => {
