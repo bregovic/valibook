@@ -64,6 +64,8 @@ interface ReconciliationError {
 interface ValidationResult {
   errors: ValidationError[];
   reconciliation?: ReconciliationError[];
+  forbidden?: any[]; // For check failures
+  validationRules?: any[]; // For AI Rules failures
   protocol?: string;
   summary: {
     totalChecks: number;
@@ -92,6 +94,42 @@ function App() {
   const [showManualLinkModal, setShowManualLinkModal] = useState(false);
   const [manualLinkSource, setManualLinkSource] = useState<{ table: string; column: string } | null>(null);
   const [manualLinkTarget, setManualLinkTarget] = useState<{ table: string; column: string } | null>(null);
+
+  // AI States
+  const [showAIModal, setShowAIModal] = useState(false);
+  const [apiKey, setApiKey] = useState('');
+  const [aiPassword, setAiPassword] = useState('Heslo123');
+  const [aiResult, setAiResult] = useState('');
+  const [generatingAI, setGeneratingAI] = useState(false);
+
+  // Generate Rules Logic
+  const generateAIRules = async () => {
+    if (!selectedProject || !apiKey) return;
+    setGeneratingAI(true);
+    setAiResult('Analyzuji strukturu dat...');
+    try {
+      const res = await fetch(`${API_URL}/projects/${selectedProject.id}/ai-suggest-rules`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ apiKey, password: aiPassword })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setAiResult(`✅ Úspěch! Vygenerováno ${data.rules.length} pravidel.`);
+        setTimeout(() => {
+          setShowAIModal(false);
+          setAiResult('');
+          alert('Pravidla byla vygenerována. Spusťte prosím VALIDACI pro kontrolu.');
+        }, 2000);
+      } else {
+        setAiResult(`❌ Chyba: ${data.error || 'Neznámá chyba'}`);
+      }
+    } catch (err) {
+      setAiResult(`❌ Chyba sítě: ${(err as Error).message}`);
+    } finally {
+      setGeneratingAI(false);
+    }
+  };
 
   // Load projects
   const loadProjects = useCallback(async () => {
@@ -599,6 +637,20 @@ function App() {
                         >
                           ➕ Ruční vazba
                         </button>
+                        <button
+                          style={{
+                            background: '#8b5cf6', // Violet
+                            color: 'white',
+                            border: 'none',
+                            padding: '8px 16px',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            fontWeight: 500
+                          }}
+                          onClick={() => setShowAIModal(true)}
+                        >
+                          ✨ AI Pravidla
+                        </button>
                       </div>
                       {(detecting || validating) && (
                         <div style={{ width: '100%', maxWidth: '300px' }}>
@@ -993,6 +1045,109 @@ function App() {
                 ✓ Vytvořit vazbu
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI Rules Modal */}
+      {showAIModal && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 1000
+        }}>
+          <div style={{
+            background: 'white',
+            padding: '24px',
+            borderRadius: '12px',
+            width: '400px',
+            maxWidth: '90%',
+            boxShadow: '0 4px 20px rgba(0,0,0,0.2)'
+          }}>
+            <h3 style={{ margin: '0 0 16px', color: '#1f2937' }}>✨ AI Návrh Pravidel</h3>
+
+            {!aiResult || aiResult.startsWith('Analyzuji') ? (
+              <>
+                <p style={{ margin: '0 0 12px', color: '#4b5563', fontSize: '0.9rem' }}>
+                  Zadejte vaše OpenAI API Key pro analýzu struktury dat a generování validačních pravidel.
+                </p>
+
+                <div style={{ marginBottom: '12px' }}>
+                  <label style={{ display: 'block', marginBottom: '4px', fontSize: '0.85rem', fontWeight: 500 }}>OpenAI API Key (sk-...)</label>
+                  <input
+                    type="password"
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    placeholder="sk-..."
+                    style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #d1d5db' }}
+                  />
+                </div>
+
+                <div style={{ marginBottom: '20px' }}>
+                  <label style={{ display: 'block', marginBottom: '4px', fontSize: '0.85rem', fontWeight: 500 }}>Bezpečnostní heslo</label>
+                  <input
+                    type="password"
+                    value={aiPassword}
+                    onChange={(e) => setAiPassword(e.target.value)}
+                    placeholder="Heslo"
+                    style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #d1d5db' }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                  <button
+                    onClick={() => setShowAIModal(false)}
+                    style={{ padding: '8px 16px', background: '#f3f4f6', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+                    disabled={generatingAI}
+                  >
+                    Zrušit
+                  </button>
+                  <button
+                    onClick={generateAIRules}
+                    disabled={generatingAI || !apiKey}
+                    style={{
+                      padding: '8px 16px',
+                      background: generatingAI ? '#9ca3af' : '#8b5cf6',
+                      color: 'white',
+                      border: 'none',
+                      borderRadius: '6px',
+                      cursor: generatingAI ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    {generatingAI ? 'Generuji...' : '✨ Vygenerovat'}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div style={{ textAlign: 'center' }}>
+                <p style={{ marginBottom: '20px', fontSize: '1.1rem', color: aiResult.startsWith('✅') ? 'green' : 'red' }}>
+                  {aiResult}
+                </p>
+                <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
+                  <button
+                    onClick={() => { setShowAIModal(false); setAiResult(''); }}
+                    style={{ padding: '8px 16px', background: '#f3f4f6', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+                  >
+                    Zavřít
+                  </button>
+                  {aiResult.startsWith('❌') && (
+                    <button
+                      onClick={() => setAiResult('')}
+                      style={{ padding: '8px 16px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+                    >
+                      Zkusit znovu
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

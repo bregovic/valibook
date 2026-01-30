@@ -448,6 +448,143 @@ app.get('/api/projects/:projectId/profile', async (req, res) => {
 });
 
 // ============================================
+// AI SUGGEST RULES (OpenAI Integration)
+// ============================================
+app.post('/api/projects/:projectId/ai-suggest-rules', async (req, res) => {
+    const { projectId } = req.params;
+    const { apiKey, password } = req.body;
+
+    // 1. Simple Security Gate
+    if (password !== 'Heslo123') {
+        return res.status(403).json({ error: 'Neplatné heslo pro AI funkce.' });
+    }
+    if (!apiKey) {
+        return res.status(400).json({ error: 'Chybí OpenAI API Key.' });
+    }
+
+    try {
+        // 2. Generate Profile (Reuse logic or call internal function)
+        const columns = await prisma.column.findMany({
+            where: { projectId },
+            orderBy: [{ tableName: 'asc' }, { columnIndex: 'asc' }]
+        });
+
+        // Simplified profile for AI token limits
+        const tablesProfile: Record<string, any[]> = {};
+        const columnIdMap: Record<string, string> = {}; // Name -> ID mapping
+
+        for (const col of columns) {
+            if (!tablesProfile[col.tableName]) tablesProfile[col.tableName] = [];
+
+            // Store ID for later mapping
+            const key = `${col.tableName}.${col.columnName}`;
+            columnIdMap[key] = col.id;
+
+            tablesProfile[col.tableName].push({
+                column: col.columnName,
+                // Only send relevant stats to save likely tokens
+                type: col.dataType || 'STRING',
+                sample: col.sampleValues ? (col.sampleValues as string[]).slice(0, 3) : [], // reduced samples for AI context
+                stats: {
+                    unique: col.uniqueCount,
+                    nulls: col.nullCount,
+                    pattern: col.pattern // e.g. Regex if detected
+                }
+            });
+        }
+
+        // 3. Construct Prompt
+        const prompt = `
+            You are a Data Quality Engineer. Analyze the database schema below and suggest validation rules.
+            
+            SCHEMA:
+            ${JSON.stringify(tablesProfile, null, 2)}
+
+            INSTRUCTIONS:
+            - Suggest rules to ensure data quality (Integrity, Format, Completeness).
+            - Focus on: VAT numbers, Emails, Phone numbers, IDs, Required fields.
+            - If a column has 'nulls: 0', suggest a NOT_NULL rule.
+            - If a column has 'unique' close to row count, suggest UNIQUE rule.
+            - Provide a valid Regex for standard formats (VAT, IBAN, etc).
+            - Output ONLY valid JSON array.
+
+            OUTPUT FORMAT:
+            [
+                {
+                    "table": "TableName",
+                    "column": "ColumnName",
+                    "type": "REGEX" | "NOT_NULL" | "UNIQUE",
+                    "value": "^[A-Z]{2}\\d+$" (for regex only),
+                    "description": "VAT number must be valid format",
+                    "severity": "ERROR" | "WARNING"
+                }
+            ]
+        `;
+
+        // 4. Call OpenAI
+        const aiRes = await fetch('https://api.openai.com/v1/chat/completions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+                model: "gpt-4o-mini", // Cost effective
+                messages: [
+                    { role: "system", content: "You are a pragmatic Data Quality assistant. Output JSON only." },
+                    { role: "user", content: prompt }
+                ],
+                temperature: 0.2
+            })
+        });
+
+        if (!aiRes.ok) {
+            const errText = await aiRes.text();
+            throw new Error(`OpenAI API Error: ${errText}`);
+        }
+
+        const aiData = await aiRes.json();
+        let content = aiData.choices[0].message.content;
+
+        // Clean markdown code blocks if present
+        content = content.replace(/```json/g, '').replace(/```/g, '').trim();
+
+        const suggestedRules = JSON.parse(content);
+
+        // 5. Save Rules to DB
+        const savedRules = [];
+
+        // Clear existing rules for this project (optional, or append?) 
+        // Let's APPEND/UPDATE but for now we just create new ones.
+        // Actually, user might want to clear old ones first. Let's keep it simple: create.
+
+        for (const rule of suggestedRules) {
+            const key = `${rule.table}.${rule.column}`;
+            const columnId = columnIdMap[key];
+
+            if (columnId) {
+                const saved = await prisma.validationRule.create({
+                    data: {
+                        columnId,
+                        type: rule.type,
+                        value: rule.value || null,
+                        severity: rule.severity || 'ERROR',
+                        description: rule.description
+                    }
+                });
+                savedRules.push(saved);
+            }
+        }
+
+        res.json({ success: true, rules: savedRules });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: (error as Error).message });
+    }
+});
+
+// ============================================
 // AUTO-DETECT LINKS - Find columns with overlapping values
 // ============================================
 app.post('/api/projects/:projectId/detect-links', async (req, res) => {
@@ -861,73 +998,143 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
             console.log(`[Forbidden Check] Complete. Found ${forbiddenErrors.length} issues.`);
         }
 
+        // 4. AI VALIDATION RULES CHECK
+        const rules = await prisma.validationRule.findMany({
+            where: { column: { projectId } },
+            include: { column: true }
+        });
+
+        const ruleErrors: any[] = [];
+
+        for (const rule of rules) {
+            const col = rule.column;
+            let failedCount = 0;
+            let sampleFailures: string[] = [];
+
+            if (rule.type === 'REGEX' && rule.value) {
+                // Check regex against all values (PostgreSQL Syntax ~)
+                // Use NOT ~ to find mismatches
+                // Filter out empty strings if NOT_NULL is not enforced here (usually format applies to non-empty)
+                try {
+                    const failures = await prisma.$queryRaw<Array<{ value: string }>>`
+                        SELECT value FROM "column_values"
+                        WHERE "columnId" = ${col.id}
+                          AND value != ''
+                          AND NOT (value ~ ${rule.value})
+                        LIMIT 10
+                    `;
+
+                    if (failures.length > 0) {
+                        const countRes = await prisma.$queryRaw<Array<{ count: bigint }>>`
+                            SELECT COUNT(*) as count FROM "column_values"
+                            WHERE "columnId" = ${col.id}
+                              AND value != ''
+                              AND NOT (value ~ ${rule.value})
+                        `;
+                        failedCount = Number(countRes[0].count);
+                        sampleFailures = failures.map(f => f.value);
+                    }
+                } catch (err) {
+                    console.error(`Regex check failed for ${rule.value}:`, err);
+                    // Invalid regex provided by AI?
+                }
+
+            } else if (rule.type === 'NOT_NULL') {
+                failedCount = col.nullCount || 0;
+                if (failedCount > 0) {
+                    sampleFailures = ['(Empty values)'];
+                }
+            } else if (rule.type === 'UNIQUE') {
+                // Approximate check using metadata
+                if (col.uniqueCount !== col.rowCount) {
+                    // Get duplicates
+                    const duplicates = await prisma.$queryRaw<Array<{ value: string, count: bigint }>>`
+                        SELECT value, COUNT(*) as count
+                        FROM "column_values"
+                        WHERE "columnId" = ${col.id}
+                        GROUP BY value
+                        HAVING COUNT(*) > 1
+                        LIMIT 5
+                     `;
+                    failedCount = col.rowCount! - col.uniqueCount!; // Rough estimate of issues
+                    sampleFailures = duplicates.map(d => `${d.value} (${d.count}x)`);
+                }
+            }
+
+            if (failedCount > 0) {
+                ruleErrors.push({
+                    table: col.tableName,
+                    column: col.columnName,
+                    ruleType: rule.type,
+                    ruleValue: rule.value,
+                    description: rule.description,
+                    failedCount,
+                    samples: sampleFailures
+                });
+
+                allChecks.push({
+                    type: 'PRAVIDLO',
+                    label: `${col.tableName}.${col.columnName} (${rule.type})`,
+                    status: 'ERROR',
+                    checked: col.rowCount || 0,
+                    failed: failedCount
+                });
+            } else {
+                allChecks.push({
+                    type: 'PRAVIDLO',
+                    label: `${col.tableName}.${col.columnName} (${rule.type})`,
+                    status: 'OK',
+                    checked: col.rowCount || 0,
+                    failed: 0
+                });
+            }
+        }
+
+
         // Generate Protocol
         const totalFailed = allChecks.filter(c => c.status === 'ERROR').length;
         const totalPassed = allChecks.filter(c => c.status === 'OK').length;
-        const status = totalFailed === 0 ? 'ÚSPĚŠNÉ' : 'S CHYBAMI';
-        const timestamp = new Date().toLocaleString('cs-CZ');
 
-        let protocol = `PROTOKOL O VALIDACI\n`;
-        protocol += `=====================\n`;
-        protocol += `Datum: ${timestamp}\n`;
-        protocol += `Stav: ${status}\n`;
-        protocol += `----------------------------------------\n`;
-        protocol += `Celkem kontrol: ${allChecks.length}\n`;
-        protocol += `Úspěšné: ${totalPassed}\n`;
-        protocol += `Selhalo: ${totalFailed}\n\n`;
+        let protocol = `PROTOKOL O VALIDACI\n=====================\nDatum: ${new Date().toLocaleString('cs-CZ')}\nStav: ${totalFailed > 0 ? 'S CHYBAMI' : 'ÚSPĚŠNÉ'}\n${'-'.repeat(40)}\nCelkem kontrol: ${allChecks.length}\nÚspěšné: ${totalPassed}\nSelhalo: ${totalFailed}\n\n`;
 
-        protocol += `[METODIKA VALIDACE]\n`;
-        protocol += `1. INTEGRITA (Foreign Key)\n`;
-        protocol += `   - Metoda: SQL NOT EXISTS query.\n`;
-        protocol += `   - Princip: Hledá hodnoty ve zdrojovém sloupci, které nemají odpovídající záznam v cílové (master) tabulce.\n`;
-        protocol += `2. REKONSILIACE (Shoda dat)\n`;
-        protocol += `   - Metoda: SQL Comparison přes JOIN klíč.\n`;
-        protocol += `   - Princip: Spojí řádky tabulek přes definovaný klíč a porovnává hodnoty v ostatních sloupcích.\n`;
-        protocol += `3. ZAKÁZANÉ HODNOTY (Blacklist)\n`;
-        protocol += `   - Metoda: SQL INTERSECT.\n`;
-        protocol += `   - Princip: Pro každou tabulku typu 'FORBIDDEN' hledá průnik hodnot s tabulkami stejného názvu sloupce.\n\n`;
+        protocol += `[METODIKA VALIDACE]\n1. INTEGRITA (Foreign Key)\n   - Metoda: SQL NOT EXISTS query.\n   - Princip: Hledá hodnoty ve zdrojovém sloupci, které nemají odpovídající záznam v cílové (master) tabulce.\n2. REKONSILIACE (Shoda dat)\n   - Metoda: SQL Comparison přes JOIN klíč.\n   - Princip: Spojí řádky tabulek přes definovaný klíč a porovnává hodnoty v ostatních sloupcích.\n3. ZAKÁZANÉ HODNOTY (Blacklist)\n   - Metoda: SQL INTERSECT (case-insensitive).\n4. PRAVIDLA (AI/Custom)\n   - Regex, NotNull, Unique kontroly.\n\n`;
 
         protocol += `[DETAILNÍ VÝPIS VŠECH KONTROL]\n`;
-        allChecks.forEach((check, index) => {
-            const icon = check.status === 'OK' ? '✅' : '❌';
-            const records = check.checked > 0 ? `${check.checked} záznamů` : (check.type === 'ZAKÁZANÉ' ? 'Analýza průniku' : 'N/A');
-            protocol += `${index + 1}. [${check.type}] ${check.label}\n`;
-            protocol += `   Stav: ${icon} ${check.status}\n`;
-            protocol += `   Rozsah: ${records}\n`;
-            if (check.status === 'ERROR') {
-                protocol += `   Chyb: ${check.failed}\n`;
-            }
-            protocol += `\n`;
+        allChecks.forEach(check => {
+            protocol += `[${check.status === 'OK' ? 'OK' : 'CHYBA'}] ${check.type}: ${check.label} (Zkontrolováno: ${check.checked}, Vadných: ${check.failed})\n`;
         });
 
         if (totalFailed > 0) {
-            protocol += `[DETAIL CHYB]\n`;
+            protocol += `\n[DETAIL CHYB]\n`;
+
             if (forbiddenErrors.length > 0) {
                 protocol += `--- ZAKÁZANÉ HODNOTY ---\n`;
                 forbiddenErrors.forEach(e => {
-                    protocol += `- ${e.targetTable}.${e.column} obsahuje ${e.count} zakázaných hodnot z ${e.forbiddenTable}.${e.forbiddenColumn}: ${e.foundValues.join(', ')}...\n`;
+                    protocol += `- ${e.targetTable}.${e.column} obsahuje ${e.count} zakázaných hodnot (např. ${e.foundValues.join(', ')})\n`;
                 });
-                protocol += `\n`;
             }
-
             if (integrityErrors.length > 0) {
                 protocol += `--- INTEGRITA (SIROTCI) ---\n`;
                 integrityErrors.forEach(e => {
                     protocol += `- ${e.fkTable}.${e.fkColumn} -> ${e.pkTable}: ${e.missingCount} chybějících\n`;
                 });
-                protocol += `\n`;
             }
-
             if (reconciliationErrors.length > 0) {
                 protocol += `--- REKONSILIACE (NESHODY) ---\n`;
                 reconciliationErrors.forEach(e => {
                     protocol += `- ${e.sourceTable} vs ${e.targetTable} (${e.joinKey}): ${e.count} neshod\n`;
                 });
-                protocol += `\n`;
             }
+            if (ruleErrors.length > 0) {
+                protocol += `--- PRAVIDLA (AI) ---\n`;
+                ruleErrors.forEach(e => {
+                    protocol += `- ${e.table}.${e.column} (${e.ruleType}): ${e.failedCount} chyb. ${e.description || ''}\n`;
+                });
+            }
+
+            protocol += `\n[ZÁVĚR]\nValidace nalezla ${totalFailed} chyb. Nutná oprava dat.\n`;
         } else {
-            protocol += `[ZÁVĚR]\n`;
-            protocol += `Všechna data jsou konzistentní. Nebyly nalezeny žádné chyby.\n`;
+            protocol += `\n[ZÁVĚR]\nVšechna data jsou konzistentní. Nebyly nalezeny žádné chyby.\n`;
         }
 
         res.json({
@@ -935,7 +1142,8 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
             errors: integrityErrors,
             reconciliation: reconciliationErrors,
             forbidden: forbiddenErrors,
-            protocol,
+            validationRules: ruleErrors,
+            protocol: protocol,
             summary: {
                 totalChecks: allChecks.length,
                 passed: totalPassed,
