@@ -163,8 +163,8 @@ function App() {
     setAiResult('Příprava analýzy...');
 
     try {
-      const tableNames = tables.map(t => t.tableName);
-      const BATCH_SIZE = 5;
+      const tableNames = tables.map((t: TableData) => t.tableName);
+      const BATCH_SIZE = 1; // Safest possible batch size for poor connections/slow API
       let totalCreated = 0;
 
       for (let i = 0; i < tableNames.length; i += BATCH_SIZE) {
@@ -197,6 +197,7 @@ function App() {
       }, 3000);
 
     } catch (err) {
+      console.error(err);
       setAiResult(`❌ Chyba: ${(err as Error).message}`);
     } finally {
       setGeneratingAI(false);
@@ -883,14 +884,14 @@ function App() {
                     {activeValidationTab === 'INTEGRITY' && (
                       <div className="validation-errors">
                         {validationResult.errors
-                          .filter(err =>
+                          .filter((err: ValidationError) =>
                             !validationSearchTerm ||
                             err.fkTable.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
                             err.fkColumn.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
                             err.pkTable.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
                             err.missingValues.some((v: string) => v.toLowerCase().includes(validationSearchTerm.toLowerCase()))
                           )
-                          .map((err, i) => (
+                          .map((err: ValidationError, i: number) => (
                             <div key={i} className="error-item">
                               <div className="error-header">
                                 <strong>{err.fkTable}.{err.fkColumn}</strong>
@@ -911,13 +912,13 @@ function App() {
                     {/* 3. FORBIDDEN VALUES */}
                     {activeValidationTab === 'FORBIDDEN' && (
                       <div className="validation-errors">
-                        {validationResult.forbidden?.filter(err =>
+                        {validationResult.forbidden?.filter((err: ForbiddenError) =>
                           !validationSearchTerm ||
                           err.targetTable.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
                           err.column.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
                           err.forbiddenTable.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
                           err.foundValues.some((v: string) => v.toLowerCase().includes(validationSearchTerm.toLowerCase()))
-                        ).map((err, i) => (
+                        ).map((err: ForbiddenError, i: number) => (
                           <div key={i} className="error-item warning">
                             <div className="error-header">
                               <strong>{err.targetTable}.{err.column}</strong>
@@ -937,13 +938,13 @@ function App() {
                     {/* 4. AI RULES */}
                     {activeValidationTab === 'RULES' && (
                       <div className="validation-errors">
-                        {validationResult.validationRules?.filter(err =>
+                        {validationResult.validationRules?.filter((err: AIRuleError) =>
                           !validationSearchTerm ||
                           err.table.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
                           err.column.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
                           err.description?.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
                           err.samples?.some((v: string) => v.toLowerCase().includes(validationSearchTerm.toLowerCase()))
-                        ).map((err, i) => (
+                        ).map((err: AIRuleError, i: number) => (
                           <div key={i} className="rule-error error-item">
                             <div className="rule-error-header">
                               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>

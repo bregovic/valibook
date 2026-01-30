@@ -616,11 +616,15 @@ app.post('/api/projects/:projectId/ai-suggest-rules', async (req, res) => {
             savedCount = result.count;
         }
 
-        res.json({ success: true, count: savedCount });
+        res.json({
+            success: true,
+            count: savedCount,
+            rules: [] // Backward compatibility for old frontend
+        });
 
     } catch (error) {
         console.error(error);
-        res.status(500).json({ error: (error as Error).message });
+        res.status(500).json({ error: (error as Error).message, success: false });
     }
 });
 
