@@ -61,11 +61,29 @@ interface ReconciliationError {
   count: number | string;
 }
 
+interface ForbiddenError {
+  targetTable: string;
+  column: string;
+  forbiddenTable: string;
+  forbiddenColumn: string;
+  foundValues: string[];
+  count: number;
+}
+
+interface AIRuleError {
+  table: string;
+  column: string;
+  ruleType: string;
+  description: string;
+  failedCount: number;
+  samples: string[];
+}
+
 interface ValidationResult {
   errors: ValidationError[];
   reconciliation?: ReconciliationError[];
-  forbidden?: any[]; // For check failures
-  validationRules?: any[]; // For AI Rules failures
+  forbidden?: ForbiddenError[];
+  validationRules?: AIRuleError[];
   protocol?: string;
   summary: {
     totalChecks: number;
@@ -852,7 +870,7 @@ function App() {
                             err.fkTable.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
                             err.fkColumn.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
                             err.pkTable.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
-                            err.missingValues.some(v => v.toLowerCase().includes(validationSearchTerm.toLowerCase()))
+                            err.missingValues.some((v: string) => v.toLowerCase().includes(validationSearchTerm.toLowerCase()))
                           )
                           .map((err, i) => (
                             <div key={i} className="error-item">
@@ -880,7 +898,7 @@ function App() {
                           err.targetTable.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
                           err.column.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
                           err.forbiddenTable.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
-                          err.foundValues.some(v => v.toLowerCase().includes(validationSearchTerm.toLowerCase()))
+                          err.foundValues.some((v: string) => v.toLowerCase().includes(validationSearchTerm.toLowerCase()))
                         ).map((err, i) => (
                           <div key={i} className="error-item warning">
                             <div className="error-header">
@@ -906,7 +924,7 @@ function App() {
                           err.table.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
                           err.column.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
                           err.description?.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
-                          err.samples?.some(v => v.toLowerCase().includes(validationSearchTerm.toLowerCase()))
+                          err.samples?.some((v: string) => v.toLowerCase().includes(validationSearchTerm.toLowerCase()))
                         ).map((err, i) => (
                           <div key={i} className="rule-error error-item">
                             <div className="rule-error-header">
