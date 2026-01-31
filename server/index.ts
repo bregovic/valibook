@@ -904,7 +904,8 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                     const isSourceUnique = sourceUniqueRatio >= 0.9 && (colA.rowCount ?? 0) > 0;
                     const isTargetUnique = targetUniqueRatio >= 0.9 && (colB.rowCount ?? 0) > 0;
 
-                    if (isSourceUnique || isTargetUnique) {
+                    // Allow if strictly unique (for Keys) OR if we are explicitly looking for Values (relaxed)
+                    if (isSourceUnique || isTargetUnique || mode === 'VALUES') {
                         // Mark this pair as seen
                         seenPairs.add(pairKey);
 
@@ -940,6 +941,7 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                 }
             }
         }
+
 
 
 
