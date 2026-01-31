@@ -1095,11 +1095,11 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
         });
 
         if (forbiddenColumns.length > 0) {
-            // Get ALL candidate columns (SOURCE and TARGET) - no name filtering
+            // Get candidate columns (TARGET only - skip SOURCE as per user request)
             const candidateColumns = await prisma.column.findMany({
                 where: {
                     projectId,
-                    tableType: { in: ['SOURCE', 'TARGET'] }
+                    tableType: 'TARGET'
                 }
             });
 
