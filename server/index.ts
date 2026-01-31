@@ -945,7 +945,7 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
             }
         }
     }
-        }
+    }
 
 
         // Sort by match count (highest first)
