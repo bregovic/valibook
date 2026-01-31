@@ -818,7 +818,9 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
 
             for (const colB of columns) {
                 if (colA.id === colB.id) continue;
-                if (colA.tableName === colB.tableName) continue; // Skip same table
+                // Match based on string pair (sorted IDs)
+                const pairKey = [colA.id, colB.id].sort().join('|');
+                if (seenPairs.has(pairKey)) continue;
 
                 // HEURISTIC: Robust Number Matching
                 // 1. Normalize SAMPLES (Target) in JS: remove all whitespace, replace ',' with '.'
