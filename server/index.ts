@@ -848,7 +848,7 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                 // Let's use simpler logic for AI suggestion:
                 const matchPercentage = Math.round((commonValues / Math.max(colA.uniqueCount || 1, 1)) * 100);
 
-                if (matchPercentage >= 50 || commonValues >= 10 || namesSimilar) {
+                if (matchPercentage >= 90) {
                     // Check uniqueness: at least one side must have 90%+ unique values
                     const sourceUniqueRatio = (colA.uniqueCount ?? 0) / Math.max(colA.rowCount ?? 1, 1);
                     const targetUniqueRatio = (colB.uniqueCount ?? 0) / Math.max(colB.rowCount ?? 1, 1);
