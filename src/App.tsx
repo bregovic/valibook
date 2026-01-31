@@ -8,6 +8,7 @@ interface Column {
   columnName: string;
   columnIndex: number;
   isPrimaryKey: boolean;
+  isValidationRange: boolean;
   isRequired: boolean;
   uniqueCount: number | null;
   nullCount: number | null;
@@ -534,6 +535,16 @@ function App() {
 
     // Remove applied suggestion
     setLinkSuggestions(prev => prev.filter(s => s.sourceColumnId !== suggestion.sourceColumnId));
+  };
+
+  // Toggle validation range
+  const toggleValidationRange = async (columnId: string, current: boolean) => {
+    await fetch(`${API_URL}/columns/${columnId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isValidationRange: !current })
+    });
+    if (selectedProject) loadTables(selectedProject.id);
   };
 
   // Toggle primary key
@@ -1265,7 +1276,8 @@ function App() {
                         <thead>
                           <tr>
                             <th>Sloupec</th>
-                            <th>PK</th>
+                            <th title="Primární klíč">PK</th>
+                            <th title="Určuje rozsah validace (scope)">Rozsah</th>
                             <th>Unikát</th>
                             <th>Prázdné</th>
                             <th>Vzorky</th>
@@ -1285,6 +1297,20 @@ function App() {
                                     title="Primární klíč"
                                   >
                                     🔑
+                                  </button>
+                                </td>
+                                <td>
+                                  <button
+                                    className={`pk-btn ${col.isValidationRange ? 'active' : ''}`}
+                                    onClick={() => toggleValidationRange(col.id, col.isValidationRange)}
+                                    style={{
+                                      background: col.isValidationRange ? '#fef3c7' : '#f9fafb',
+                                      borderColor: col.isValidationRange ? '#f59e0b' : '#e5e7eb',
+                                      filter: col.isValidationRange ? 'none' : 'grayscale(100%) opacity(0.5)'
+                                    }}
+                                    title="Rozsah validace"
+                                  >
+                                    🎯
                                   </button>
                                 </td>
                                 <td className="stat">{col.uniqueCount}</td>

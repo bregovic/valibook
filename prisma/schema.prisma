@@ -49,6 +49,7 @@ model Column {
   
   // Klíče a metadata
   isPrimaryKey Boolean   @default(false) // Je to primární klíč?
+  isValidationRange Boolean @default(false) // Určuje rozsah validace pro ostatní tabulky?
   isRequired   Boolean   @default(false) // Je povinný?
   
   // Vzorková data (10 náhodných hodnot) pro rychlý náhled

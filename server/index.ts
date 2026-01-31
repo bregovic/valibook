@@ -301,13 +301,14 @@ app.get('/api/columns/:id', async (req, res) => {
 
 app.patch('/api/columns/:id', async (req, res) => {
     const { id } = req.params;
-    const { isPrimaryKey, isRequired, linkedToColumnId } = req.body;
+    const { isPrimaryKey, isValidationRange, isRequired, linkedToColumnId } = req.body;
 
     try {
         const column = await prisma.column.update({
             where: { id },
             data: {
                 ...(isPrimaryKey !== undefined && { isPrimaryKey }),
+                ...(isValidationRange !== undefined && { isValidationRange }),
                 ...(isRequired !== undefined && { isRequired }),
                 ...(linkedToColumnId !== undefined && { linkedToColumnId })
             }
@@ -388,6 +389,7 @@ app.get('/api/projects/:projectId/tables', async (req, res) => {
                 columnName: col.columnName,
                 columnIndex: col.columnIndex,
                 isPrimaryKey: col.isPrimaryKey,
+                isValidationRange: col.isValidationRange,
                 isRequired: col.isRequired,
                 uniqueCount: col.uniqueCount,
                 nullCount: col.nullCount,
@@ -927,7 +929,7 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
         const fkColumns = [];
 
         for (const col of allLinks) {
-            if (col.linkedToColumn?.tableType === 'RANGE') {
+            if (col.linkedToColumn?.tableType === 'RANGE' || col.linkedToColumn?.isValidationRange) {
                 rangeFilters.set(col.tableName, { colId: col.id, rangeColId: col.linkedToColumnId! });
             } else {
                 fkColumns.push(col);
