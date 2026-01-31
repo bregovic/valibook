@@ -824,17 +824,21 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                 if (seenPairs.has(pairKey)) continue;
 
                 // HEURISTIC: Check how many samples of A exist in B
-                // This is exactly what the user requested: "if 90%+ values appear in another file"
-                // Using SQL for precise check but limited to samples to be fast
+                // Enhanced with basic normalization (spaces, commas) to handle number formatting differences
                 const matchRes = await prisma.$queryRawUnsafe<Array<{ match_count: bigint }>>(`
                     SELECT COUNT(DISTINCT value) as match_count
                     FROM "column_values"
-                    WHERE "columnId" = $1 AND value IN (${samplesA.map((_, i) => `$${i + 2}`).join(',')})
+                    WHERE "columnId" = $1 
+                      AND (
+                        value IN (${samplesA.map((_, i) => `$${i + 2}`).join(',')})
+                        OR REPLACE(value, ' ', '') IN (${samplesA.map((_, i) => `$${i + 2}`).join(',')})
+                        OR REPLACE(REPLACE(value, ' ', ''), ',', '.') IN (${samplesA.map((v) => `'${v.replace(/ /g, '').replace(',', '.')}'`).join(',')})
+                      )
                 `, colB.id, ...samplesA);
 
                 const sampleMatchCount = Number(matchRes[0].match_count);
                 const sampleMatchPct = Math.round((sampleMatchCount / samplesA.length) * 100);
-                const namesSimilar = colA.columnName.toLowerCase() === colB.columnName.toLowerCase();
+                const namesSimilar = colA.columnName.trim().toLowerCase() === colB.columnName.trim().toLowerCase();
 
                 // RELAXED THRESHOLDS: 
                 // 70% threshold for general matches (was 90%)
