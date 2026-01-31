@@ -416,6 +416,35 @@ app.delete('/api/rules/:id', async (req, res) => {
     }
 });
 
+// Bulk delete rules
+app.post('/api/rules/bulk-delete', async (req, res) => {
+    const { ids } = req.body;
+    if (!Array.isArray(ids)) return res.status(400).json({ error: 'IDs must be an array' });
+    try {
+        await prisma.validationRule.deleteMany({
+            where: { id: { in: ids } }
+        });
+        res.json({ success: true });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: (error as Error).message });
+    }
+});
+
+// Delete entire table
+app.delete('/api/projects/:projectId/tables/:tableName', async (req, res) => {
+    const { projectId, tableName } = req.params;
+    try {
+        await prisma.column.deleteMany({
+            where: { projectId, tableName }
+        });
+        res.json({ success: true });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: (error as Error).message });
+    }
+});
+
 // Get failing records for a rule
 app.get('/api/rules/:id/failures', async (req, res) => {
     try {

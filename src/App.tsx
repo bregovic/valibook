@@ -119,6 +119,7 @@ function App() {
   const [selectedRuleFailures, setSelectedRuleFailures] = useState<any[]>([]);
   const [loadingFailures, setLoadingFailures] = useState(false);
   const [activeRuleTitle, setActiveRuleTitle] = useState('');
+  const [selectedRuleIds, setSelectedRuleIds] = useState<Set<string>>(new Set());
 
   // AI States
   const [showAIModal, setShowAIModal] = useState(false);
@@ -237,6 +238,58 @@ function App() {
       setSelectedRuleFailures(data.failures || []);
     } catch (e) { console.error(e); }
     setLoadingFailures(false);
+  };
+
+  const deleteSelectedRules = async () => {
+    if (selectedRuleIds.size === 0 || !confirm(`Opravdu chcete smazat ${selectedRuleIds.size} vybraných pravidel?`)) return;
+    try {
+      const res = await fetch(`${API_URL}/rules/bulk-delete`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: Array.from(selectedRuleIds) })
+      });
+      const data = await res.json();
+      if (data.success) {
+        if (validationResult) {
+          setValidationResult({
+            ...validationResult,
+            validationRules: validationResult.validationRules?.filter(r => !selectedRuleIds.has(r.ruleId))
+          });
+        }
+        setSelectedRuleIds(new Set());
+      }
+    } catch (e) { alert('Chyba při mazání.'); }
+  };
+
+  const removeColumnLink = async (tableName: string, columnName: string) => {
+    if (!selectedProject || !confirm(`Opravdu chcete zrušit vazbu pro ${tableName}.${columnName}?`)) return;
+    try {
+      const table = tables.find(t => t.tableName === tableName);
+      const col = table?.columns.find(c => c.columnName === columnName);
+      if (!col) return;
+
+      const res = await fetch(`${API_URL}/columns/${col.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ linkedToColumnId: null })
+      });
+      if (res.ok) {
+        alert('Vazba byla zrušena. Spusťte prosím znovu VALIDACI.');
+        loadTables(selectedProject.id);
+      }
+    } catch (e) { alert('Chyba při rušení vazby.'); }
+  };
+
+  const deleteForbiddenTable = async (tableName: string) => {
+    if (!selectedProject || !confirm(`Opravdu chcete smazat tabulku zakázaných hodnot: ${tableName}?`)) return;
+    try {
+      const res = await fetch(`${API_URL}/projects/${selectedProject.id}/tables/${tableName}`, { method: 'DELETE' });
+      const data = await res.json();
+      if (data.success) {
+        alert('Tabulka byla smazána.');
+        loadTables(selectedProject.id);
+      }
+    } catch (e) { alert('Chyba při mazání tabulky.'); }
   };
 
   // Load projects
@@ -935,9 +988,20 @@ function App() {
                                 <span className="error-count">{err.missingCount} chybějících (sirotků)</span>
                               </div>
                               <div className="missing-values">
-                                <div style={{ marginBottom: '0.5rem', fontSize: '0.75rem', color: '#94a3b8' }}>Tyto hodnoty neexistují v číselníku {err.pkTable}:</div>
-                                {err.missingValues.join(', ')}
-                                {err.missingCount > 10 && ` ... a dalších ${err.missingCount - 10}`}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                  <div style={{ flex: 1 }}>
+                                    <div style={{ marginBottom: '0.5rem', fontSize: '0.75rem', color: '#94a3b8' }}>Tyto hodnoty neexistují v číselníku {err.pkTable}:</div>
+                                    {err.missingValues.join(', ')}
+                                    {err.missingCount > 10 && ` ... a dalších ${err.missingCount - 10}`}
+                                  </div>
+                                  <button
+                                    onClick={() => removeColumnLink(err.fkTable, err.fkColumn)}
+                                    className="secondary-btn"
+                                    style={{ padding: '4px 8px', fontSize: '0.7rem', color: '#dc2626', borderColor: '#fecaca', background: '#fff', marginLeft: '1rem' }}
+                                  >
+                                    Zrušit vazbu
+                                  </button>
+                                </div>
                               </div>
                             </div>
                           ))}
@@ -962,8 +1026,19 @@ function App() {
                               <span className="error-count" style={{ background: '#fef3c7', color: '#d97706', borderColor: '#fcd34d' }}>{err.count} zakázaných hodnot</span>
                             </div>
                             <div className="missing-values">
-                              Nalezeny hodnoty z blacklistu: {err.foundValues.join(', ')}
-                              {err.count > 10 && ` ... a dalších ${err.count - 10}`}
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                                <div style={{ flex: 1 }}>
+                                  Nalezeny hodnoty z blacklistu: {err.foundValues.join(', ')}
+                                  {err.count > 10 && ` ... a dalších ${err.count - 10}`}
+                                </div>
+                                <button
+                                  onClick={() => deleteForbiddenTable(err.forbiddenTable)}
+                                  className="secondary-btn"
+                                  style={{ padding: '4px 8px', fontSize: '0.7rem', color: '#dc2626', borderColor: '#fecaca', background: '#fff', marginLeft: '1rem' }}
+                                >
+                                  Smazat blacklist
+                                </button>
+                              </div>
                             </div>
                           </div>
                         ))}
@@ -973,6 +1048,37 @@ function App() {
                     {/* 4. AI RULES */}
                     {activeValidationTab === 'RULES' && (
                       <div className="validation-errors">
+                        {validationResult.validationRules && validationResult.validationRules.length > 0 && (
+                          <div style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '0.9rem' }}>
+                              <input
+                                type="checkbox"
+                                checked={validationResult.validationRules.length > 0 && selectedRuleIds.size === validationResult.validationRules.length}
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    setSelectedRuleIds(new Set(validationResult.validationRules?.map(r => r.ruleId)));
+                                  } else {
+                                    setSelectedRuleIds(new Set());
+                                  }
+                                }}
+                                style={{ width: '18px', height: '18px' }}
+                              />
+                              Vybrat všechna pravidla
+                            </label>
+                            <button
+                              onClick={deleteSelectedRules}
+                              disabled={selectedRuleIds.size === 0}
+                              className="secondary-btn"
+                              style={{
+                                background: selectedRuleIds.size > 0 ? '#fee2e2' : '#f3f4f6',
+                                color: selectedRuleIds.size > 0 ? '#dc2626' : '#9ca3af',
+                                borderColor: selectedRuleIds.size > 0 ? '#fecaca' : '#e5e7eb'
+                              }}
+                            >
+                              Smazat vybrané ({selectedRuleIds.size})
+                            </button>
+                          </div>
+                        )}
                         {validationResult.validationRules?.filter((err: AIRuleError) =>
                           !validationSearchTerm ||
                           err.table.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
@@ -980,36 +1086,51 @@ function App() {
                           err.description?.toLowerCase().includes(validationSearchTerm.toLowerCase()) ||
                           err.samples?.some((v: string) => v.toLowerCase().includes(validationSearchTerm.toLowerCase()))
                         ).map((err: AIRuleError, i: number) => (
-                          <div key={i} className="rule-error error-item">
-                            <div className="rule-error-header">
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                                <span className="rule-type-label">{err.ruleType}</span>
-                                <strong>{err.table}.{err.column}</strong>
-                              </div>
-                              <span
-                                className="error-count"
-                                style={{ borderColor: '#ddd', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
-                                onClick={() => fetchRuleFailures(err)}
-                                title="Klikněte pro zobrazení záznamů"
-                              >
-                                🔍 {err.failedCount} vadných řádků
-                              </span>
+                          <div key={i} className="rule-error error-item" style={{ display: 'flex', gap: '12px', alignItems: 'flex-start' }}>
+                            <div style={{ paddingTop: '12px' }}>
+                              <input
+                                type="checkbox"
+                                checked={selectedRuleIds.has(err.ruleId)}
+                                onChange={(e) => {
+                                  const newSet = new Set(selectedRuleIds);
+                                  if (e.target.checked) newSet.add(err.ruleId);
+                                  else newSet.delete(err.ruleId);
+                                  setSelectedRuleIds(newSet);
+                                }}
+                                style={{ width: '18px', height: '18px', cursor: 'pointer' }}
+                              />
                             </div>
-                            <div style={{ padding: '1rem' }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
-                                <div className="rule-description" style={{ flex: 1 }}>{err.description || 'Validace podle AI pravidla.'}</div>
-                                <button
-                                  onClick={() => deleteRule(err.ruleId)}
-                                  className="secondary-btn"
-                                  style={{ padding: '4px 8px', fontSize: '0.7rem', color: '#dc2626', borderColor: '#fecaca', background: '#fff' }}
+                            <div style={{ flex: 1 }}>
+                              <div className="rule-error-header">
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                                  <span className="rule-type-label">{err.ruleType}</span>
+                                  <strong>{err.table}.{err.column}</strong>
+                                </div>
+                                <span
+                                  className="error-count"
+                                  style={{ borderColor: '#ddd', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '4px' }}
+                                  onClick={() => fetchRuleFailures(err)}
+                                  title="Klikněte pro zobrazení záznamů"
                                 >
-                                  Smazat
-                                </button>
+                                  🔍 {err.failedCount} vadných řádků
+                                </span>
                               </div>
-                              <div style={{ marginTop: '0.75rem' }}>
-                                <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: '#94a3b8', marginBottom: '0.25rem' }}>Ukázka chyb:</div>
-                                <div className="missing-values" style={{ background: '#fafafa', border: '1px solid #eee' }}>
-                                  {err.samples?.join(', ') || 'Není k dispozici'}
+                              <div style={{ padding: '1rem' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '1rem' }}>
+                                  <div className="rule-description" style={{ flex: 1 }}>{err.description || 'Validace podle AI pravidla.'}</div>
+                                  <button
+                                    onClick={() => deleteRule(err.ruleId)}
+                                    className="secondary-btn"
+                                    style={{ padding: '4px 8px', fontSize: '0.7rem', color: '#dc2626', borderColor: '#fecaca', background: '#fff' }}
+                                  >
+                                    Smazat
+                                  </button>
+                                </div>
+                                <div style={{ marginTop: '0.75rem' }}>
+                                  <div style={{ fontSize: '0.7rem', textTransform: 'uppercase', color: '#94a3b8', marginBottom: '0.25rem' }}>Ukázka chyb:</div>
+                                  <div className="missing-values" style={{ background: '#fafafa', border: '1px solid #eee' }}>
+                                    {err.samples?.join(', ') || 'Není k dispozici'}
+                                  </div>
                                 </div>
                               </div>
                             </div>
