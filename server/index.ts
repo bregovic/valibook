@@ -820,19 +820,22 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                 if (colA.id === colB.id) continue;
                 if (colA.tableName === colB.tableName) continue; // Skip same table
 
-                const pairKey = [colA.id, colB.id].sort().join('|');
-                if (seenPairs.has(pairKey)) continue;
+                // HEURISTIC: Robust Number Matching
+                // 1. Normalize SAMPLES (Target) in JS: remove all whitespace, replace ',' with '.'
+                const normalizedSamples = samplesA.map(s => String(s).replace(/\s/g, '').replace(',', '.'));
 
-                // HEURISTIC: Check how many samples of A exist in B
-                // Enhanced with basic normalization (spaces, commas) to handle number formatting differences
+                // 2. Normalize DB VALUES (Source) in SQL and compare against normalized samples
+                // We handle standard space, non-breaking space (chr 160), and comma/dot replacement
                 const matchRes = await prisma.$queryRawUnsafe<Array<{ match_count: bigint }>>(`
                     SELECT COUNT(DISTINCT value) as match_count
                     FROM "column_values"
                     WHERE "columnId" = $1 
                       AND (
+                        -- Exact match
                         value IN (${samplesA.map((_, i) => `$${i + 2}`).join(',')})
-                        OR REPLACE(value, ' ', '') IN (${samplesA.map((_, i) => `$${i + 2}`).join(',')})
-                        OR REPLACE(REPLACE(value, ' ', ''), ',', '.') IN (${samplesA.map((v) => `'${v.replace(/ /g, '').replace(',', '.')}'`).join(',')})
+                        OR 
+                        -- Normalized match (Remove spaces/NBSP, replace comma with dot)
+                        REPLACE(REPLACE(REPLACE(value, ' ', ''), chr(160), ''), ',', '.') IN (${normalizedSamples.map(s => `'${s}'`).join(',')})
                       )
                 `, colB.id, ...samplesA);
 
