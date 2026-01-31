@@ -518,23 +518,45 @@ function App() {
 
   // Apply link suggestion
   const applyLink = async (suggestion: LinkSuggestion, skipReload = false) => {
+    // 1. Apply the main link
     await fetch(`${API_URL}/columns/${suggestion.sourceColumnId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ linkedToColumnId: suggestion.targetColumnId })
     });
 
-    // Mark target as primary key if not already
-    await fetch(`${API_URL}/columns/${suggestion.targetColumnId}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isPrimaryKey: true })
-    });
+    // Mark target as primary key IF it looks like a key (high match) - heuristic
+    // Or just strictly if the suggestion came from 'KEYS' mode? We don't track mode.
+    // We'll trust that if it's 90%+ match, it's likely a key context or accurate value.
+    if (suggestion.matchPercentage >= 90) {
+      await fetch(`${API_URL}/columns/${suggestion.targetColumnId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isPrimaryKey: true })
+      });
+    }
+
+    // 2. AUTO-CASCADE: Find other suggestions between the SAME tables and apply them automatically
+    // This solves the user's issue: "I linked the key, but other columns didn't link automatically"
+    const cascadeLinks = linkSuggestions.filter(s =>
+      s.sourceTable === suggestion.sourceTable &&
+      s.targetTable === suggestion.targetTable &&
+      s.sourceColumnId !== suggestion.sourceColumnId // Don't re-apply self
+    );
+
+    for (const cascade of cascadeLinks) {
+      await fetch(`${API_URL}/columns/${cascade.sourceColumnId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ linkedToColumnId: cascade.targetColumnId })
+      });
+    }
 
     if (!skipReload && selectedProject) loadTables(selectedProject.id);
 
-    // Remove applied suggestion
-    setLinkSuggestions(prev => prev.filter(s => s.sourceColumnId !== suggestion.sourceColumnId));
+    // Remove applied suggestion AND cascaded suggestions
+    const appliedIds = new Set([suggestion.sourceColumnId, ...cascadeLinks.map(c => c.sourceColumnId)]);
+    setLinkSuggestions(prev => prev.filter(s => !appliedIds.has(s.sourceColumnId)));
   };
 
   // Toggle validation range
