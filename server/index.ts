@@ -757,6 +757,7 @@ app.post('/api/projects/:projectId/ai-suggest-rules', async (req, res) => {
 // ============================================
 app.post('/api/projects/:projectId/detect-links', async (req, res) => {
     const { projectId } = req.params;
+    const mode = req.query.mode as string | undefined; // 'KEYS' | 'VALUES'
 
     try {
         // Get all columns
@@ -852,6 +853,10 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
 
                 const uniquenessA = (colA.uniqueCount ?? 0) / Math.max(colA.rowCount ?? 1, 1);
                 const isKeyCandidate = uniquenessA > 0.95; // High uniqueness required for keys
+
+                // FILTER BY MODE: Exclude candidates that don't match the requested mode
+                if (mode === 'KEYS' && !isKeyCandidate) continue;
+                if (mode === 'VALUES' && isKeyCandidate) continue;
 
                 let isMatch = false;
 

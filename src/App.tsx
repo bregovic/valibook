@@ -449,12 +449,12 @@ function App() {
   };
 
   // Detect links automatically
-  const detectLinks = async () => {
+  const detectLinks = async (mode: 'KEYS' | 'VALUES') => {
     if (!selectedProject) return;
 
     setDetecting(true);
     try {
-      const res = await fetch(`${API_URL}/projects/${selectedProject.id}/detect-links`, {
+      const res = await fetch(`${API_URL}/projects/${selectedProject.id}/detect-links?mode=${mode}`, {
         method: 'POST'
       });
       const data = await res.json();
@@ -790,10 +790,18 @@ function App() {
                       <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
                         <button
                           className="detect-btn"
-                          onClick={detectLinks}
+                          style={{ background: '#f59e0b', borderColor: '#d97706' }}
+                          onClick={() => detectLinks('KEYS')}
                           disabled={detecting}
                         >
-                          {detecting ? '🔍 Hledám...' : '🔍 Najít vazby'}
+                          {detecting ? '🔍 ...' : '🔑 Najít Klíče'}
+                        </button>
+                        <button
+                          className="detect-btn"
+                          onClick={() => detectLinks('VALUES')}
+                          disabled={detecting}
+                        >
+                          {detecting ? '🔍 ...' : '📋 Najít Hodnoty'}
                         </button>
                         <button
                           className="validate-btn"
