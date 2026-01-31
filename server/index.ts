@@ -777,7 +777,7 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
         const columnSamplesMap = new Map<string, string[]>();
 
         for (const col of columns) {
-            // Get 20 random samples to increase initial detection accuracy
+            // Get 30 random unique samples to be extra sure
             const samples = await prisma.$queryRaw<Array<{ value: string }>>`
                 SELECT value FROM (
                     SELECT DISTINCT value 
@@ -787,7 +787,7 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                       AND value IS NOT NULL
                 ) AS distinct_vals
                 ORDER BY random() 
-                LIMIT 20
+                LIMIT 30
             `;
             columnSamplesMap.set(col.id, samples.map(s => s.value));
         }
@@ -808,50 +808,47 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
         // Track seen pairs to avoid duplicates
         const seenPairs = new Set<string>();
 
-        // Phase 1: Heavy overlap check using samples (optimized)
-        // We only compare columns that haven't been linked yet
+        // For each column A, we check its samples against ALL other columns B
         for (const colA of columns) {
             const samplesA = columnSamplesMap.get(colA.id);
             if (!samplesA || samplesA.length === 0) continue;
 
             for (const colB of columns) {
                 if (colA.id === colB.id) continue;
-                if (colA.tableName === colB.tableName) continue; // Same table
+                if (colA.tableName === colB.tableName) continue; // Skip same table
 
                 const pairKey = [colA.id, colB.id].sort().join('|');
                 if (seenPairs.has(pairKey)) continue;
 
-                const samplesB = new Set(columnSamplesMap.get(colB.id) || []);
+                // HEURISTIC: Check how many samples of A exist in B
+                // This is exactly what the user requested: "if 90%+ values appear in another file"
+                // Using SQL for precise check but limited to samples to be fast
+                const matchRes = await prisma.$queryRawUnsafe<Array<{ match_count: bigint }>>(`
+                    SELECT COUNT(DISTINCT value) as match_count
+                    FROM "column_values"
+                    WHERE "columnId" = $1 AND value IN (${samplesA.map((_, i) => `$${i + 2}`).join(',')})
+                `, colB.id, ...samplesA);
 
-                // Quick heuristic: Check if names are similar OR samples overlap
+                const sampleMatchCount = Number(matchRes[0].match_count);
+                const sampleMatchPct = Math.round((sampleMatchCount / samplesA.length) * 100);
                 const namesSimilar = colA.columnName.toLowerCase() === colB.columnName.toLowerCase();
-                let sampleMatchCount = 0;
-                for (const s of samplesA) if (samplesB.has(s)) sampleMatchCount++;
 
-                if (!namesSimilar && sampleMatchCount === 0) continue;
+                // 90% threshold for samples, or 50% if names are same
+                if (sampleMatchPct >= 90 || (namesSimilar && sampleMatchPct >= 50)) {
+                    // To get exact commonValues for UI, we do a full intersect (only for likely candidates)
+                    const overlapRes = await prisma.$queryRaw<Array<{ overlap_count: bigint }>>`
+                        SELECT COUNT(*) as overlap_count
+                        FROM (
+                            SELECT DISTINCT value FROM "column_values" WHERE "columnId" = ${colA.id} AND value != ''
+                            INTERSECT
+                            SELECT DISTINCT value FROM "column_values" WHERE "columnId" = ${colB.id} AND value != ''
+                        ) AS overlap
+                    `;
+                    const commonValues = Number(overlapRes[0].overlap_count);
+                    const matchPctA = Math.round((commonValues / Math.max(colA.uniqueCount || 1, 1)) * 100);
+                    const matchPctB = Math.round((commonValues / Math.max(colB.uniqueCount || 1, 1)) * 100);
+                    const bestMatchPct = Math.max(matchPctA, matchPctB, sampleMatchPct);
 
-                // Phase 2: Targeted SQL check only for candidates
-                // This replaces loading everything into RAM
-                const overlapRes = await prisma.$queryRaw<Array<{ overlap_count: bigint }>>`
-                    SELECT COUNT(*) as overlap_count
-                    FROM (
-                        SELECT DISTINCT value FROM "column_values" WHERE "columnId" = ${colA.id} AND value != ''
-                        INTERSECT
-                        SELECT DISTINCT value FROM "column_values" WHERE "columnId" = ${colB.id} AND value != ''
-                    ) AS overlap
-                `;
-
-                const commonValues = Number(overlapRes[0].overlap_count);
-                if (commonValues < 5) continue; // Not enough overlap
-
-                const matchPctA = Math.round((commonValues / Math.max(colA.uniqueCount || 1, 1)) * 100);
-                const matchPctB = Math.round((commonValues / Math.max(colB.uniqueCount || 1, 1)) * 100);
-                const bestMatchPct = Math.max(matchPctA, matchPctB);
-
-                // Logic: 
-                // 1. Either side matches 90%+ 
-                // 2. OR Names are same AND either side matches 60%+
-                if (bestMatchPct >= 90 || (namesSimilar && bestMatchPct >= 60)) {
                     // Check uniqueness: at least one side must have 90%+ unique values
                     const sourceUniqueRatio = (colA.uniqueCount ?? 0) / Math.max(colA.rowCount ?? 1, 1);
                     const targetUniqueRatio = (colB.uniqueCount ?? 0) / Math.max(colB.rowCount ?? 1, 1);
