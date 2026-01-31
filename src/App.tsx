@@ -1255,13 +1255,20 @@ function App() {
                 </div>
               )}
 
-              {tables.length === 0 ? (
-                <div className="empty-state">
-                  <p>Žádné tabulky. Nahrajte Excel soubor.</p>
+              {tables.filter(t => t.tableType === uploadType).length === 0 ? (
+                <div className="empty-state" style={{ padding: '4rem 2rem' }}>
+                  <p style={{ color: '#64748b', fontSize: '1.1rem' }}>
+                    {tables.length === 0
+                      ? 'Žádné tabulky. Nahrajte Excel soubor.'
+                      : `V režimu '${uploadType === 'SOURCE' ? 'Zdrojová tabulka' :
+                        uploadType === 'TARGET' ? 'Kontrolovaná tabulka' :
+                          uploadType === 'FORBIDDEN' ? 'Zakázané hodnoty' : 'Rozsah hodnot'
+                      }' nejsou zatím žádné tabulky.`}
+                  </p>
                 </div>
               ) : (
                 <div className="tables-grid">
-                  {tables.map(table => (
+                  {tables.filter(table => table.tableType === uploadType).map(table => (
                     <div key={table.tableName} className={`table-card ${table.tableType.toLowerCase()}`}>
                       <div className="table-header">
                         <span className="table-type-badge">
