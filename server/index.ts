@@ -882,14 +882,10 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                         isMatch = true;
                     }
                 }
-                if (sampleMatchPct >= 60 || (namesSimilar && sampleMatchPct >= 40)) {
-                    isMatch = true;
-                }
-            }
 
-            if (isMatch) {
-                // To get exact commonValues for UI, we do a full intersect (only for likely candidates)
-                const overlapRes = await prisma.$queryRaw<Array<{ overlap_count: bigint }>>`
+                if (isMatch) {
+                    // To get exact commonValues for UI, we do a full intersect (only for likely candidates)
+                    const overlapRes = await prisma.$queryRaw<Array<{ overlap_count: bigint }>>`
                         SELECT COUNT(*) as overlap_count
                         FROM (
                             SELECT DISTINCT value FROM "column_values" WHERE "columnId" = ${colA.id} AND value != ''
@@ -897,71 +893,71 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                             SELECT DISTINCT value FROM "column_values" WHERE "columnId" = ${colB.id} AND value != ''
                         ) AS overlap
                     `;
-                const commonValues = Number(overlapRes[0].overlap_count);
-                const matchPctA = Math.round((commonValues / Math.max(colA.uniqueCount || 1, 1)) * 100);
-                const matchPctB = Math.round((commonValues / Math.max(colB.uniqueCount || 1, 1)) * 100);
-                const bestMatchPct = Math.max(matchPctA, matchPctB, sampleMatchPct);
+                    const commonValues = Number(overlapRes[0].overlap_count);
+                    const matchPctA = Math.round((commonValues / Math.max(colA.uniqueCount || 1, 1)) * 100);
+                    const matchPctB = Math.round((commonValues / Math.max(colB.uniqueCount || 1, 1)) * 100);
+                    const bestMatchPct = Math.max(matchPctA, matchPctB, sampleMatchPct);
 
-                // Check uniqueness: at least one side must have 90%+ unique values
-                const sourceUniqueRatio = (colA.uniqueCount ?? 0) / Math.max(colA.rowCount ?? 1, 1);
-                const targetUniqueRatio = (colB.uniqueCount ?? 0) / Math.max(colB.rowCount ?? 1, 1);
-                const isSourceUnique = sourceUniqueRatio >= 0.9 && (colA.rowCount ?? 0) > 0;
-                const isTargetUnique = targetUniqueRatio >= 0.9 && (colB.rowCount ?? 0) > 0;
+                    // Check uniqueness: at least one side must have 90%+ unique values
+                    const sourceUniqueRatio = (colA.uniqueCount ?? 0) / Math.max(colA.rowCount ?? 1, 1);
+                    const targetUniqueRatio = (colB.uniqueCount ?? 0) / Math.max(colB.rowCount ?? 1, 1);
+                    const isSourceUnique = sourceUniqueRatio >= 0.9 && (colA.rowCount ?? 0) > 0;
+                    const isTargetUnique = targetUniqueRatio >= 0.9 && (colB.rowCount ?? 0) > 0;
 
-                if (isSourceUnique || isTargetUnique) {
-                    // Mark this pair as seen
-                    seenPairs.add(pairKey);
+                    if (isSourceUnique || isTargetUnique) {
+                        // Mark this pair as seen
+                        seenPairs.add(pairKey);
 
-                    // Determine direction: FK (less unique) -> PK (more unique)
-                    const shouldReverse = targetUniqueRatio < sourceUniqueRatio;
+                        // Determine direction: FK (less unique) -> PK (more unique)
+                        const shouldReverse = targetUniqueRatio < sourceUniqueRatio;
 
-                    if (shouldReverse) {
-                        suggestions.push({
-                            sourceColumnId: colB.id,
-                            sourceColumn: colB.columnName,
-                            sourceTable: colB.tableName,
-                            targetColumnId: colA.id,
-                            targetColumn: colA.columnName,
-                            targetTable: colA.tableName,
-                            matchPercentage: bestMatchPct,
-                            commonValues: commonValues,
-                            sampleSize: samplesA.length
-                        });
-                    } else {
-                        suggestions.push({
-                            sourceColumnId: colA.id,
-                            sourceColumn: colA.columnName,
-                            sourceTable: colA.tableName,
-                            targetColumnId: colB.id,
-                            targetColumn: colB.columnName,
-                            targetTable: colB.tableName,
-                            matchPercentage: bestMatchPct,
-                            commonValues: commonValues,
-                            sampleSize: samplesA.length
-                        });
+                        if (shouldReverse) {
+                            suggestions.push({
+                                sourceColumnId: colB.id,
+                                sourceColumn: colB.columnName,
+                                sourceTable: colB.tableName,
+                                targetColumnId: colA.id,
+                                targetColumn: colA.columnName,
+                                targetTable: colA.tableName,
+                                matchPercentage: bestMatchPct,
+                                commonValues: commonValues,
+                                sampleSize: samplesA.length
+                            });
+                        } else {
+                            suggestions.push({
+                                sourceColumnId: colA.id,
+                                sourceColumn: colA.columnName,
+                                sourceTable: colA.tableName,
+                                targetColumnId: colB.id,
+                                targetColumn: colB.columnName,
+                                targetTable: colB.tableName,
+                                matchPercentage: bestMatchPct,
+                                commonValues: commonValues,
+                                sampleSize: samplesA.length
+                            });
+                        }
                     }
                 }
             }
+
+
+
+
+
+
+            // Sort by match count (highest first)
+            suggestions.sort((a, b) => b.commonValues - a.commonValues || b.matchPercentage - a.matchPercentage);
+
+            res.json({
+                success: true,
+                suggestions: suggestions.slice(0, 100) // Limit to top 100
+            });
+
+        } catch (error) {
+            console.error(error);
+            res.status(500).json({ error: (error as Error).message });
         }
-
-
-
-
-
-
-        // Sort by match count (highest first)
-        suggestions.sort((a, b) => b.commonValues - a.commonValues || b.matchPercentage - a.matchPercentage);
-
-        res.json({
-            success: true,
-            suggestions: suggestions.slice(0, 100) // Limit to top 100
-        });
-
-    } catch (error) {
-        console.error(error);
-        res.status(500).json({ error: (error as Error).message });
-    }
-});
+    });
 
 // ============================================
 // VALIDATE PROJECT - Check FK integrity
