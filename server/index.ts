@@ -835,6 +835,7 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
 
                 // 2. Normalize DB VALUES (Source) in SQL and compare against normalized samples
                 // We handle standard space, non-breaking space (chr 160), and comma/dot replacement
+                const paramOffset = 2 + samplesA.length;
                 const matchRes = await prisma.$queryRawUnsafe<Array<{ match_count: bigint }>>(`
                     SELECT COUNT(DISTINCT value) as match_count
                     FROM "column_values"
@@ -844,9 +845,9 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                         value IN (${samplesA.map((_, i) => `$${i + 2}`).join(',')})
                         OR 
                         -- Normalized match (Remove spaces/NBSP, replace comma with dot)
-                        REPLACE(REPLACE(REPLACE(value, ' ', ''), chr(160), ''), ',', '.') IN (${normalizedSamples.map(s => `'${s}'`).join(',')})
+                        REPLACE(REPLACE(REPLACE(value, ' ', ''), chr(160), ''), ',', '.') IN (${normalizedSamples.map((_, i) => `$${i + paramOffset}`).join(',')})
                       )
-                `, colB.id, ...samplesA);
+                `, colB.id, ...samplesA, ...normalizedSamples);
 
                 const sampleMatchCount = Number(matchRes[0].match_count);
                 const sampleMatchPct = Math.round((sampleMatchCount / samplesA.length) * 100);
