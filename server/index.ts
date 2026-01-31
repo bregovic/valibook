@@ -1020,6 +1020,11 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
 
             if (fkCol.tableType === 'SOURCE' && !filter) continue;
 
+            // CRITICAL FIX: Skip Integrity (Orphan) checks for "Value Links" (Amounts, etc.)
+            // We only want to check "Missing Keys" for actual Reference Keys (PK/FK).
+            // Value checks (Reconciliation) are handled in the next section.
+            if (!fkCol.linkedToColumn.isPrimaryKey) continue;
+
             let checkedCount = 0;
             let orphans: any[] = [];
             let totalOrphans = 0;
