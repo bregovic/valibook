@@ -817,6 +817,34 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
             const samplesA = columnSamplesMap.get(colA.id);
             if (!samplesA || samplesA.length === 0) continue;
 
+            // HEURISTIC: Robust Number Matching
+            // 1. Normalize SAMPLES (Target) in JS
+            const normalizedSamples = samplesA.map(s => String(s).replace(/\s/g, '').replace(',', '.'));
+            const stringSamples = samplesA.map(s => String(s));
+
+            // 2. Normalize DB VALUES (Source) in SQL and scan ALL columns at once (Batched Query)
+            const paramOffset = 2 + stringSamples.length;
+
+            const matchRes = await prisma.$queryRawUnsafe<Array<{ columnId: string, match_count: bigint }>>(`
+                    SELECT "columnId", COUNT(DISTINCT value) as match_count
+                    FROM "column_values"
+                    WHERE "columnId" != $1 
+                      AND (
+                        value::text IN (${stringSamples.map((_, i) => `$${i + 2}`).join(',')})
+                        OR 
+                        REPLACE(REPLACE(REPLACE(value::text, ' ', ''), chr(160), ''), ',', '.') IN (${normalizedSamples.map((_, i) => `$${i + paramOffset}`).join(',')})
+                      )
+                    GROUP BY "columnId"
+                `, colA.id, ...stringSamples, ...normalizedSamples);
+
+            // Create a fast lookup map: columnId -> matchCount
+            const matchMap = new Map<string, number>();
+            matchRes.forEach(r => matchMap.set(r.columnId, Number(r.match_count)));
+
+            // Pre-calculate heuristics for colA
+            const uniquenessA = (colA.uniqueCount ?? 0) / Math.max(colA.rowCount ?? 1, 1);
+            const isKeyCandidate = uniquenessA > 0.80;
+
             for (const colB of columns) {
                 if (colA.id === colB.id) continue;
                 if (colA.tableName.toLowerCase() === colB.tableName.toLowerCase()) continue; // Strict Case-Insensitive self-reference check
@@ -829,9 +857,11 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                 const pairKey = [colA.id, colB.id].sort().join('|');
                 if (seenPairs.has(pairKey)) continue;
 
-                // HEURISTIC: Robust Number Matching
-                // 1. Normalize SAMPLES (Target) in JS: remove all whitespace, replace ',' with '.'
-                const normalizedSamples = samplesA.map(s => String(s).replace(/\s/g, '').replace(',', '.'));
+                // Check if we found any matches in the DB scan
+                if (!matchMap.has(colB.id)) continue;
+
+                const sampleMatchCount = matchMap.get(colB.id)!;
+                /* OLD LOGIC REMOVED
 
                 // 2. Normalize DB VALUES (Source) in SQL and compare against normalized samples
                 const paramOffset = 2 + samplesA.length;
@@ -849,16 +879,14 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                       )
                 `, colB.id, ...stringSamples, ...normalizedSamples);
 
-                const sampleMatchCount = Number(matchRes[0].match_count);
+                */
                 const sampleMatchPct = Math.round((sampleMatchCount / samplesA.length) * 100);
                 const namesSimilar = colA.columnName.trim().toLowerCase() === colB.columnName.trim().toLowerCase();
 
                 // LOGIC SPLIT: KEY CANDIDATE vs VALUE CANDIDATE
                 // User Request: "Find Reference Keys" strictly for unique non-duplicate values.
 
-                const uniquenessA = (colA.uniqueCount ?? 0) / Math.max(colA.rowCount ?? 1, 1);
-                // RELAXED UNIQUENESS: 80% is enough to be considered a potential key (allows for some dirty data)
-                const isKeyCandidate = uniquenessA > 0.80;
+
 
                 // FILTER BY MODE: 
                 // KEYS mode: Only show high-uniqueness candidates
