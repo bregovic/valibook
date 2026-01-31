@@ -940,28 +940,27 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                 }
             }
         }
+
+
+
+
+
+
+
+
+        // Sort by match count (highest first)
+        suggestions.sort((a, b) => b.commonValues - a.commonValues || b.matchPercentage - a.matchPercentage);
+
+        res.json({
+            success: true,
+            suggestions: suggestions.slice(0, 100) // Limit to top 100
+        });
+
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: (error as Error).message });
     }
-}
-
-
-
-
-
-
-
-            // Sort by match count (highest first)
-            suggestions.sort((a, b) => b.commonValues - a.commonValues || b.matchPercentage - a.matchPercentage);
-
-res.json({
-    success: true,
-    suggestions: suggestions.slice(0, 100) // Limit to top 100
 });
-
-} catch (error) {
-    console.error(error);
-    res.status(500).json({ error: (error as Error).message });
-}
-    });
 
 // ============================================
 // VALIDATE PROJECT - Check FK integrity
