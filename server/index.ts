@@ -821,6 +821,10 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                 if (colA.id === colB.id) continue;
                 if (colA.tableName.toLowerCase() === colB.tableName.toLowerCase()) continue; // Strict Case-Insensitive self-reference check
 
+                // OPTIMIZATION: In 'KEYS' mode, the TARGET candidate (colB) MUST be unique-ish.
+                const uniquenessB = (colB.uniqueCount ?? 0) / Math.max(colB.rowCount ?? 1, 1);
+                if (mode === 'KEYS' && uniquenessB < 0.80) continue;
+
                 // Match based on string pair (sorted IDs)
                 const pairKey = [colA.id, colB.id].sort().join('|');
                 if (seenPairs.has(pairKey)) continue;
