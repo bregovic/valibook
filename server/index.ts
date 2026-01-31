@@ -936,6 +936,18 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
             }
         }
 
+        // Transitive range filter propagation (one level)
+        // If TabB links to TabA.ColX, and TabA.ColX defines a range scope, TabB inherits it.
+        const extendedFilters = new Map(rangeFilters);
+        for (const col of allLinks) {
+            if (!extendedFilters.has(col.tableName)) {
+                const targetFilter = rangeFilters.get(col.linkedToColumn!.tableName);
+                if (targetFilter && targetFilter.colId === col.linkedToColumnId) {
+                    extendedFilters.set(col.tableName, { colId: col.id, rangeColId: targetFilter.rangeColId });
+                }
+            }
+        }
+
         // 1. INTEGRITY CHECKS (Orphans) - SQL Optimized
         const integrityErrors = [];
         const reconciliationErrors = [];
@@ -945,7 +957,11 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
         for (const fkCol of fkColumns) {
             if (!fkCol.linkedToColumn) continue;
 
-            const filter = rangeFilters.get(fkCol.tableName);
+            // SKIP integrity checks for SOURCE tables - as per user request
+            // (Source tables may contain records not intended for export)
+            if (fkCol.tableType === 'SOURCE') continue;
+
+            const filter = extendedFilters.get(fkCol.tableName);
 
             let checkedCount = 0;
             let orphans: any[] = [];
@@ -1090,8 +1106,8 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
         for (const [pairKey, group] of tablePairs.entries()) {
             if (!group.keyLink || group.valueLinks.length === 0) continue;
 
-            const filterS = rangeFilters.get(group.keyLink.tableName);
-            const filterT = rangeFilters.get(group.keyLink.linkedToColumn.tableName);
+            const filterS = extendedFilters.get(group.keyLink.tableName);
+            const filterT = extendedFilters.get(group.keyLink.linkedToColumn.tableName);
 
             // Get Checked Count (Joined rows)
             const joinedCountRes = await prisma.$queryRawUnsafe<Array<{ count: bigint }>>(`
@@ -1200,7 +1216,7 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
                     // Skip if same table
                     if (fCol.tableName === tCol.tableName) continue;
 
-                    const filter = rangeFilters.get(tCol.tableName);
+                    const filter = extendedFilters.get(tCol.tableName);
                     // Find intersection with normalization (LOWER + TRIM)
                     const intersection = await prisma.$queryRawUnsafe<Array<{
                         match_count: bigint;
@@ -1272,7 +1288,7 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
             let failedCount = 0;
             let sampleFailures: string[] = [];
 
-            const filter = rangeFilters.get(col.tableName);
+            const filter = extendedFilters.get(col.tableName);
             if (rule.type === 'REGEX' && rule.value) {
                 try {
                     if (filter) {
@@ -1322,24 +1338,65 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
                     console.error(`Regex check failed for ${rule.value}:`, err);
                 }
             } else if (rule.type === 'NOT_NULL') {
-                failedCount = col.nullCount || 0;
+                if (filter) {
+                    const countRes = await prisma.$queryRaw<Array<{ count: bigint }>>`
+                        SELECT COUNT(*) as count FROM "column_values" v
+                        JOIN "column_values" f ON f."rowIndex" = v."rowIndex" AND f."columnId" = ${filter.colId}
+                        WHERE v."columnId" = ${col.id}
+                          AND (v.value IS NULL OR v.value = '')
+                          AND EXISTS (SELECT 1 FROM "column_values" rv WHERE rv."columnId" = ${filter.rangeColId} AND rv.value = f.value)
+                    `;
+                    failedCount = Number(countRes[0].count);
+                } else {
+                    failedCount = col.nullCount || 0;
+                }
                 if (failedCount > 0) {
                     sampleFailures = ['(Empty values)'];
                 }
             } else if (rule.type === 'UNIQUE') {
-                // Approximate check using metadata
-                if (col.uniqueCount !== col.rowCount) {
-                    // Get duplicates
+                if (filter) {
                     const duplicates = await prisma.$queryRaw<Array<{ value: string, count: bigint }>>`
-                        SELECT value, COUNT(*) as count
-                        FROM "column_values"
-                        WHERE "columnId" = ${col.id}
-                        GROUP BY value
+                        SELECT v.value, COUNT(*) as count
+                        FROM "column_values" v
+                        JOIN "column_values" f ON f."rowIndex" = v."rowIndex" AND f."columnId" = ${filter.colId}
+                        WHERE v."columnId" = ${col.id}
+                          AND v.value != ''
+                          AND EXISTS (SELECT 1 FROM "column_values" rv WHERE rv."columnId" = ${filter.rangeColId} AND rv.value = f.value)
+                        GROUP BY v.value
                         HAVING COUNT(*) > 1
-                        LIMIT 5
-                     `;
-                    failedCount = col.rowCount! - col.uniqueCount!; // Rough estimate of issues
-                    sampleFailures = duplicates.map(d => `${d.value} (${d.count}x)`);
+                        LIMIT 11
+                    `;
+                    if (duplicates.length > 0) {
+                        const totalRes = await prisma.$queryRaw<Array<{ count: bigint }>>`
+                           SELECT SUM(sub.dupe_count) as count FROM (
+                             SELECT COUNT(*) as dupe_count
+                             FROM "column_values" v
+                             JOIN "column_values" f ON f."rowIndex" = v."rowIndex" AND f."columnId" = ${filter.colId}
+                             WHERE v."columnId" = ${col.id}
+                               AND v.value != ''
+                               AND EXISTS (SELECT 1 FROM "column_values" rv WHERE rv."columnId" = ${filter.rangeColId} AND rv.value = f.value)
+                             GROUP BY v.value
+                             HAVING COUNT(*) > 1
+                           ) AS sub
+                        `;
+                        failedCount = Number(totalRes[0].count);
+                        sampleFailures = duplicates.slice(0, 10).map(d => `${d.value} (${d.count}x)`);
+                    }
+                } else {
+                    // Approximate check using metadata
+                    if (col.uniqueCount !== col.rowCount) {
+                        // Get duplicates
+                        const duplicates = await prisma.$queryRaw<Array<{ value: string, count: bigint }>>`
+                            SELECT value, COUNT(*) as count
+                            FROM "column_values"
+                            WHERE "columnId" = ${col.id}
+                            GROUP BY value
+                            HAVING COUNT(*) > 1
+                            LIMIT 5
+                         `;
+                        failedCount = col.rowCount! - col.uniqueCount!;
+                        sampleFailures = duplicates.map(d => `${d.value} (${d.count}x)`);
+                    }
                 }
             } else if (rule.type === 'MATH_EQUATION' && rule.value) {
                 // Rule format: "[ColA] * [ColB] = [ColC]"
