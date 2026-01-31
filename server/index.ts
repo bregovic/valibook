@@ -966,11 +966,13 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
         for (const fkCol of fkColumns) {
             if (!fkCol.linkedToColumn) continue;
 
-            // SKIP integrity checks for SOURCE tables - as per user request
-            // (Source tables may contain records not intended for export)
-            if (fkCol.tableType === 'SOURCE') continue;
-
+            // Smart logic for SOURCE tables:
+            // 1. If it's TARGET, always check.
+            // 2. If it's SOURCE, only check if it is constrained by a Range Filter.
+            //    (Otherwise we flag all non-exported source records as errors, which is spam.)
             const filter = extendedFilters.get(fkCol.tableName);
+
+            if (fkCol.tableType === 'SOURCE' && !filter) continue;
 
             let checkedCount = 0;
             let orphans: any[] = [];
