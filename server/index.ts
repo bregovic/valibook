@@ -912,7 +912,7 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
 
     try {
         // Get all columns with links
-        const fkColumns = await prisma.column.findMany({
+        const allLinks = await prisma.column.findMany({
             where: {
                 projectId,
                 linkedToColumnId: { not: null }
@@ -921,6 +921,18 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
                 linkedToColumn: true
             }
         });
+
+        // Separate RANGE filters from actual foreign key links
+        const rangeFilters = new Map<string, { colId: string, rangeColId: string }>();
+        const fkColumns = [];
+
+        for (const col of allLinks) {
+            if (col.linkedToColumn?.tableType === 'RANGE') {
+                rangeFilters.set(col.tableName, { colId: col.id, rangeColId: col.linkedToColumnId! });
+            } else {
+                fkColumns.push(col);
+            }
+        }
 
         // 1. INTEGRITY CHECKS (Orphans) - SQL Optimized
         const integrityErrors = [];
@@ -931,28 +943,71 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
         for (const fkCol of fkColumns) {
             if (!fkCol.linkedToColumn) continue;
 
-            // Get total checked count (non-empty values)
-            const checkedCount = await prisma.columnValue.count({
-                where: { columnId: fkCol.id, value: { not: '' } }
-            });
+            const filter = rangeFilters.get(fkCol.tableName);
 
-            const orphans = await prisma.$queryRaw<Array<{ value: string }>>`
-                SELECT v.value 
-                FROM "column_values" v
-                WHERE v."columnId" = ${fkCol.id}
-                  AND v.value != ''
-                  AND NOT EXISTS (
-                    SELECT 1 FROM "column_values" target
-                    WHERE target."columnId" = ${fkCol.linkedToColumnId}
-                      AND target.value = v.value
-                  )
-                LIMIT 11
-            `;
+            let checkedCount = 0;
+            let orphans: any[] = [];
+            let totalOrphans = 0;
 
-            if (orphans.length > 0) {
-                // Get approx count
+            if (filter) {
+                // FILTERED Integrity Check
                 const countRes = await prisma.$queryRaw<Array<{ count: bigint }>>`
-                    SELECT COUNT(*) as count
+                    SELECT COUNT(DISTINCT v.value) as count
+                    FROM "column_values" v
+                    JOIN "column_values" f ON f."rowIndex" = v."rowIndex" AND f."columnId" = ${filter.colId}
+                    WHERE v."columnId" = ${fkCol.id}
+                      AND v.value != ''
+                      AND EXISTS (
+                        SELECT 1 FROM "column_values" rv 
+                        WHERE rv."columnId" = ${filter.rangeColId} AND rv.value = f.value
+                      )
+                `;
+                checkedCount = Number(countRes[0].count);
+
+                const orphanRes = await prisma.$queryRaw<Array<{ value: string }>>`
+                    SELECT DISTINCT v.value
+                    FROM "column_values" v
+                    JOIN "column_values" f ON f."rowIndex" = v."rowIndex" AND f."columnId" = ${filter.colId}
+                    WHERE v."columnId" = ${fkCol.id}
+                      AND v.value != ''
+                      AND EXISTS (
+                        SELECT 1 FROM "column_values" rv 
+                        WHERE rv."columnId" = ${filter.rangeColId} AND rv.value = f.value
+                      )
+                      AND NOT EXISTS (
+                        SELECT 1 FROM "column_values" target
+                        WHERE target."columnId" = ${fkCol.linkedToColumnId} AND target.value = v.value
+                      )
+                    LIMIT 11
+                `;
+                orphans = orphanRes;
+
+                if (orphans.length > 0) {
+                    const totalRes = await prisma.$queryRaw<Array<{ count: bigint }>>`
+                        SELECT COUNT(DISTINCT v.value) as count
+                        FROM "column_values" v
+                        JOIN "column_values" f ON f."rowIndex" = v."rowIndex" AND f."columnId" = ${filter.colId}
+                        WHERE v."columnId" = ${fkCol.id}
+                          AND v.value != ''
+                          AND EXISTS (
+                            SELECT 1 FROM "column_values" rv 
+                            WHERE rv."columnId" = ${filter.rangeColId} AND rv.value = f.value
+                          )
+                          AND NOT EXISTS (
+                            SELECT 1 FROM "column_values" target
+                            WHERE target."columnId" = ${fkCol.linkedToColumnId} AND target.value = v.value
+                          )
+                    `;
+                    totalOrphans = Number(totalRes[0].count);
+                }
+            } else {
+                // UNFILTERED (Standard) check
+                checkedCount = await prisma.columnValue.count({
+                    where: { columnId: fkCol.id, value: { not: '' } }
+                });
+
+                orphans = await prisma.$queryRaw<Array<{ value: string }>>`
+                    SELECT v.value 
                     FROM "column_values" v
                     WHERE v."columnId" = ${fkCol.id}
                       AND v.value != ''
@@ -961,29 +1016,47 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
                         WHERE target."columnId" = ${fkCol.linkedToColumnId}
                           AND target.value = v.value
                       )
+                    LIMIT 11
                 `;
 
+                if (orphans.length > 0) {
+                    const countRes = await prisma.$queryRaw<Array<{ count: bigint }>>`
+                        SELECT COUNT(*) as count
+                        FROM "column_values" v
+                        WHERE v."columnId" = ${fkCol.id}
+                          AND v.value != ''
+                          AND NOT EXISTS (
+                            SELECT 1 FROM "column_values" target
+                            WHERE target."columnId" = ${fkCol.linkedToColumnId}
+                              AND target.value = v.value
+                          )
+                    `;
+                    totalOrphans = Number(countRes[0].count);
+                }
+            }
+
+            if (orphans.length > 0) {
                 integrityErrors.push({
                     fkTable: fkCol.tableName,
                     fkColumn: fkCol.columnName,
-                    pkTable: fkCol.linkedToColumn.tableName,
-                    pkColumn: fkCol.linkedToColumn.columnName,
+                    pkTable: fkCol.linkedToColumn!.tableName,
+                    pkColumn: fkCol.linkedToColumn!.columnName,
                     missingValues: orphans.slice(0, 10).map(o => o.value),
-                    missingCount: Number(countRes[0].count),
+                    missingCount: totalOrphans,
                     totalFkValues: checkedCount
                 });
 
                 allChecks.push({
                     type: 'INTEGRITA',
-                    label: `${fkCol.tableName}.${fkCol.columnName} -> ${fkCol.linkedToColumn.tableName}`,
+                    label: `${fkCol.tableName}.${fkCol.columnName} -> ${fkCol.linkedToColumn!.tableName}${filter ? ' (Filtrováno rozsahem)' : ''}`,
                     status: 'ERROR',
                     checked: checkedCount,
-                    failed: Number(countRes[0].count)
+                    failed: totalOrphans
                 });
             } else {
                 allChecks.push({
                     type: 'INTEGRITA',
-                    label: `${fkCol.tableName}.${fkCol.columnName} -> ${fkCol.linkedToColumn.tableName}`,
+                    label: `${fkCol.tableName}.${fkCol.columnName} -> ${fkCol.linkedToColumn!.tableName}${filter ? ' (Filtrováno rozsahem)' : ''}`,
                     status: 'OK',
                     checked: checkedCount,
                     failed: 0
@@ -1015,49 +1088,58 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
         for (const [pairKey, group] of tablePairs.entries()) {
             if (!group.keyLink || group.valueLinks.length === 0) continue;
 
+            const filterS = rangeFilters.get(group.keyLink.tableName);
+            const filterT = rangeFilters.get(group.keyLink.linkedToColumn.tableName);
+
             // Get Checked Count (Joined rows)
-            const joinedCountRes = await prisma.$queryRaw<Array<{ count: bigint }>>`
+            const joinedCountRes = await prisma.$queryRawUnsafe<Array<{ count: bigint }>>(`
                 SELECT COUNT(*) as count
                 FROM "column_values" s_key
                 JOIN "column_values" t_key 
                     ON s_key.value = t_key.value 
-                    AND t_key."columnId" = ${group.keyLink.linkedToColumnId}
-                WHERE s_key."columnId" = ${group.keyLink.id}
+                    AND t_key."columnId" = '${group.keyLink.linkedToColumnId}'
+                ${filterS ? `JOIN "column_values" fs ON fs."rowIndex" = s_key."rowIndex" AND fs."columnId" = '${filterS.colId}'` : ''}
+                ${filterT ? `JOIN "column_values" ft ON ft."rowIndex" = t_key."rowIndex" AND ft."columnId" = '${filterT.colId}'` : ''}
+                WHERE s_key."columnId" = '${group.keyLink.id}'
                   AND s_key.value != ''
-            `;
+                  ${filterS ? `AND EXISTS (SELECT 1 FROM "column_values" rv WHERE rv."columnId" = '${filterS.rangeColId}' AND rv.value = fs.value)` : ''}
+                  ${filterT ? `AND EXISTS (SELECT 1 FROM "column_values" rv WHERE rv."columnId" = '${filterT.rangeColId}' AND rv.value = ft.value)` : ''}
+            `);
             const checkedCount = Number(joinedCountRes[0].count);
 
             for (const valCol of group.valueLinks) {
-                const mismatches = await prisma.$queryRaw<Array<{ key: string, source: string, target: string }>>`
+                const mismatches = await prisma.$queryRawUnsafe<Array<{ key: string, source: string, target: string }>>(`
                     SELECT 
                         s_key.value as key,
                         s_val.value as source,
                         t_val.value as target
                     FROM "column_values" s_key
-                    JOIN "column_values" t_key 
-                        ON s_key.value = t_key.value 
-                        AND t_key."columnId" = ${group.keyLink.linkedToColumnId}
-                    JOIN "column_values" s_val
-                        ON s_val."rowIndex" = s_key."rowIndex"
-                        AND s_val."columnId" = ${valCol.id}
-                    JOIN "column_values" t_val
-                        ON t_val."rowIndex" = t_key."rowIndex"
-                        AND t_val."columnId" = ${valCol.linkedToColumnId}
-                    WHERE s_key."columnId" = ${group.keyLink.id}
+                    JOIN "column_values" t_key ON s_key.value = t_key.value AND t_key."columnId" = '${group.keyLink.linkedToColumnId}'
+                    JOIN "column_values" s_val ON s_val."rowIndex" = s_key."rowIndex" AND s_val."columnId" = '${valCol.id}'
+                    JOIN "column_values" t_val ON t_val."rowIndex" = t_key."rowIndex" AND t_val."columnId" = '${valCol.linkedToColumnId}'
+                    ${filterS ? `JOIN "column_values" fs ON fs."rowIndex" = s_key."rowIndex" AND fs."columnId" = '${filterS.colId}'` : ''}
+                    ${filterT ? `JOIN "column_values" ft ON ft."rowIndex" = t_key."rowIndex" AND ft."columnId" = '${filterT.colId}'` : ''}
+                    WHERE s_key."columnId" = '${group.keyLink.id}'
                       AND s_val.value != t_val.value
+                      ${filterS ? `AND EXISTS (SELECT 1 FROM "column_values" rv WHERE rv."columnId" = '${filterS.rangeColId}' AND rv.value = fs.value)` : ''}
+                      ${filterT ? `AND EXISTS (SELECT 1 FROM "column_values" rv WHERE rv."columnId" = '${filterT.rangeColId}' AND rv.value = ft.value)` : ''}
                     LIMIT 11
-                `;
+                `);
 
                 if (mismatches.length > 0) {
-                    const mismatchCountRes = await prisma.$queryRaw<Array<{ count: bigint }>>`
+                    const mismatchCountRes = await prisma.$queryRawUnsafe<Array<{ count: bigint }>>(`
                         SELECT COUNT(*) as count
                         FROM "column_values" s_key
-                        JOIN "column_values" t_key ON s_key.value = t_key.value AND t_key."columnId" = ${group.keyLink.linkedToColumnId}
-                        JOIN "column_values" s_val ON s_val."rowIndex" = s_key."rowIndex" AND s_val."columnId" = ${valCol.id}
-                        JOIN "column_values" t_val ON t_val."rowIndex" = t_key."rowIndex" AND t_val."columnId" = ${valCol.linkedToColumnId}
-                        WHERE s_key."columnId" = ${group.keyLink.id}
+                        JOIN "column_values" t_key ON s_key.value = t_key.value AND t_key."columnId" = '${group.keyLink.linkedToColumnId}'
+                        JOIN "column_values" s_val ON s_val."rowIndex" = s_key."rowIndex" AND s_val."columnId" = '${valCol.id}'
+                        JOIN "column_values" t_val ON t_val."rowIndex" = t_key."rowIndex" AND t_val."columnId" = '${valCol.linkedToColumnId}'
+                        ${filterS ? `JOIN "column_values" fs ON fs."rowIndex" = s_key."rowIndex" AND fs."columnId" = '${filterS.colId}'` : ''}
+                        ${filterT ? `JOIN "column_values" ft ON ft."rowIndex" = t_key."rowIndex" AND ft."columnId" = '${filterT.colId}'` : ''}
+                        WHERE s_key."columnId" = '${group.keyLink.id}'
                           AND s_val.value != t_val.value
-                     `;
+                          ${filterS ? `AND EXISTS (SELECT 1 FROM "column_values" rv WHERE rv."columnId" = '${filterS.rangeColId}' AND rv.value = fs.value)` : ''}
+                          ${filterT ? `AND EXISTS (SELECT 1 FROM "column_values" rv WHERE rv."columnId" = '${filterT.rangeColId}' AND rv.value = ft.value)` : ''}
+                     `);
                     const failedCount = Number(mismatchCountRes[0].count);
 
                     reconciliationErrors.push({
@@ -1116,30 +1198,33 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
                     // Skip if same table
                     if (fCol.tableName === tCol.tableName) continue;
 
+                    const filter = rangeFilters.get(tCol.tableName);
                     // Find intersection with normalization (LOWER + TRIM)
-                    const intersection = await prisma.$queryRaw<Array<{
+                    const intersection = await prisma.$queryRawUnsafe<Array<{
                         match_count: bigint;
                         sample_values: string;
-                    }>>`
+                    }>>(`
                         WITH matched AS (
                             SELECT f_raw.value as val
                             FROM (
                                 SELECT DISTINCT LOWER(TRIM(f.value)) as norm_val, f.value
                                 FROM "column_values" f
-                                WHERE f."columnId" = ${fCol.id}
+                                WHERE f."columnId" = '${fCol.id}'
                                   AND f.value != ''
                             ) f_raw
                             JOIN (
                                 SELECT DISTINCT LOWER(TRIM(t.value)) as norm_val
                                 FROM "column_values" t
-                                WHERE t."columnId" = ${tCol.id}
+                                ${filter ? `JOIN "column_values" rf ON rf."rowIndex" = t."rowIndex" AND rf."columnId" = '${filter.colId}'` : ''}
+                                WHERE t."columnId" = '${tCol.id}'
                                   AND t.value != ''
+                                  ${filter ? `AND EXISTS (SELECT 1 FROM "column_values" rv WHERE rv."columnId" = '${filter.rangeColId}' AND rv.value = rf.value)` : ''}
                             ) t_raw ON f_raw.norm_val = t_raw.norm_val
                         )
                         SELECT 
                             (SELECT COUNT(*) FROM matched) as match_count,
                             (SELECT STRING_AGG(val, ', ') FROM (SELECT val FROM matched ORDER BY val LIMIT 10) sub) as sample_values
-                    `;
+                    `);
 
                     if (intersection.length > 0 && Number(intersection[0].match_count) > 0) {
                         const failedCount = Number(intersection[0].match_count);
@@ -1185,34 +1270,55 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
             let failedCount = 0;
             let sampleFailures: string[] = [];
 
+            const filter = rangeFilters.get(col.tableName);
             if (rule.type === 'REGEX' && rule.value) {
-                // Check regex against all values (PostgreSQL Syntax ~)
-                // Use NOT ~ to find mismatches
-                // Filter out empty strings if NOT_NULL is not enforced here (usually format applies to non-empty)
                 try {
-                    const failures = await prisma.$queryRaw<Array<{ value: string }>>`
-                        SELECT value FROM "column_values"
-                        WHERE "columnId" = ${col.id}
-                          AND value != ''
-                          AND NOT (value ~ ${rule.value})
-                        LIMIT 10
-                    `;
+                    if (filter) {
+                        const failures = await prisma.$queryRaw<Array<{ value: string }>>`
+                            SELECT v.value FROM "column_values" v
+                            JOIN "column_values" f ON f."rowIndex" = v."rowIndex" AND f."columnId" = ${filter.colId}
+                            WHERE v."columnId" = ${col.id}
+                              AND v.value != ''
+                              AND EXISTS (SELECT 1 FROM "column_values" rv WHERE rv."columnId" = ${filter.rangeColId} AND rv.value = f.value)
+                              AND NOT (v.value ~ ${rule.value})
+                            LIMIT 10
+                        `;
 
-                    if (failures.length > 0) {
-                        const countRes = await prisma.$queryRaw<Array<{ count: bigint }>>`
-                            SELECT COUNT(*) as count FROM "column_values"
+                        if (failures.length > 0) {
+                            const countRes = await prisma.$queryRaw<Array<{ count: bigint }>>`
+                                SELECT COUNT(*) as count FROM "column_values" v
+                                JOIN "column_values" f ON f."rowIndex" = v."rowIndex" AND f."columnId" = ${filter.colId}
+                                WHERE v."columnId" = ${col.id}
+                                  AND v.value != ''
+                                  AND EXISTS (SELECT 1 FROM "column_values" rv WHERE rv."columnId" = ${filter.rangeColId} AND rv.value = f.value)
+                                  AND NOT (v.value ~ ${rule.value})
+                            `;
+                            failedCount = Number(countRes[0].count);
+                            sampleFailures = failures.map(f => f.value);
+                        }
+                    } else {
+                        const failures = await prisma.$queryRaw<Array<{ value: string }>>`
+                            SELECT value FROM "column_values"
                             WHERE "columnId" = ${col.id}
                               AND value != ''
                               AND NOT (value ~ ${rule.value})
+                            LIMIT 10
                         `;
-                        failedCount = Number(countRes[0].count);
-                        sampleFailures = failures.map(f => f.value);
+
+                        if (failures.length > 0) {
+                            const countRes = await prisma.$queryRaw<Array<{ count: bigint }>>`
+                                SELECT COUNT(*) as count FROM "column_values"
+                                WHERE "columnId" = ${col.id}
+                                  AND value != ''
+                                  AND NOT (value ~ ${rule.value})
+                            `;
+                            failedCount = Number(countRes[0].count);
+                            sampleFailures = failures.map(f => f.value);
+                        }
                     }
                 } catch (err) {
                     console.error(`Regex check failed for ${rule.value}:`, err);
-                    // Invalid regex provided by AI?
                 }
-
             } else if (rule.type === 'NOT_NULL') {
                 failedCount = col.nullCount || 0;
                 if (failedCount > 0) {
@@ -1264,7 +1370,13 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
                         for (let i = 1; i < colNames.length; i++) {
                             query += `JOIN "column_values" cv${i} ON cv0."rowIndex" = cv${i}."rowIndex" AND cv${i}."columnId" = '${nameToId[colNames[i]]}' `;
                         }
-                        query += `WHERE cv0."columnId" = '${nameToId[colNames[0]]}'`;
+                        if (filter) {
+                            query += `JOIN "column_values" f ON f."rowIndex" = cv0."rowIndex" AND f."columnId" = '${filter.colId}' `;
+                        }
+                        query += `WHERE cv0."columnId" = '${nameToId[colNames[0]]}' `;
+                        if (filter) {
+                            query += `AND EXISTS (SELECT 1 FROM "column_values" rv WHERE rv."columnId" = '${filter.rangeColId}' AND rv.value = f.value) `;
+                        }
 
                         // Parse expression into SQL
                         // replace [Name] with valX
