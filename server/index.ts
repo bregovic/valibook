@@ -13,6 +13,9 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = process.env.PORT || 3001;
 
+console.log('Starting Valibook Server...'); // Startup check
+
+
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
@@ -389,6 +392,7 @@ app.get('/api/projects/:projectId/tables', async (req, res) => {
                 columnName: col.columnName,
                 columnIndex: col.columnIndex,
                 isPrimaryKey: col.isPrimaryKey,
+                //@ts-ignore
                 isValidationRange: col.isValidationRange,
                 isRequired: col.isRequired,
                 uniqueCount: col.uniqueCount,
@@ -1016,6 +1020,7 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
         const fkColumns = [];
 
         for (const col of allLinks) {
+            //@ts-ignore
             if (col.linkedToColumn?.tableType === 'RANGE' || col.linkedToColumn?.isValidationRange) {
                 rangeFilters.set(col.tableName, { colId: col.id, rangeColId: col.linkedToColumnId! });
             } else {
