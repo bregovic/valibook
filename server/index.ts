@@ -834,20 +834,20 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                 const normalizedSamples = samplesA.map(s => String(s).replace(/\s/g, '').replace(',', '.'));
 
                 // 2. Normalize DB VALUES (Source) in SQL and compare against normalized samples
-                // We handle standard space, non-breaking space (chr 160), and comma/dot replacement
                 const paramOffset = 2 + samplesA.length;
+                // Ensure all parameters are strings to avoid type mismatch errors
+                const stringSamples = samplesA.map(s => String(s));
+
                 const matchRes = await prisma.$queryRawUnsafe<Array<{ match_count: bigint }>>(`
                     SELECT COUNT(DISTINCT value) as match_count
                     FROM "column_values"
                     WHERE "columnId" = $1 
                       AND (
-                        -- Exact match
-                        value IN (${samplesA.map((_, i) => `$${i + 2}`).join(',')})
+                        value::text IN (${stringSamples.map((_, i) => `$${i + 2}`).join(',')})
                         OR 
-                        -- Normalized match (Remove spaces/NBSP, replace comma with dot)
-                        REPLACE(REPLACE(REPLACE(value, ' ', ''), chr(160), ''), ',', '.') IN (${normalizedSamples.map((_, i) => `$${i + paramOffset}`).join(',')})
+                        REPLACE(REPLACE(REPLACE(value::text, ' ', ''), chr(160), ''), ',', '.') IN (${normalizedSamples.map((_, i) => `$${i + paramOffset}`).join(',')})
                       )
-                `, colB.id, ...samplesA, ...normalizedSamples);
+                `, colB.id, ...stringSamples, ...normalizedSamples);
 
                 const sampleMatchCount = Number(matchRes[0].match_count);
                 const sampleMatchPct = Math.round((sampleMatchCount / samplesA.length) * 100);
