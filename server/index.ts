@@ -818,6 +818,8 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
 
             for (const colB of columns) {
                 if (colA.id === colB.id) continue;
+                if (colA.tableName.toLowerCase() === colB.tableName.toLowerCase()) continue; // Strict Case-Insensitive self-reference check
+
                 // Match based on string pair (sorted IDs)
                 const pairKey = [colA.id, colB.id].sort().join('|');
                 if (seenPairs.has(pairKey)) continue;
@@ -845,10 +847,29 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                 const sampleMatchPct = Math.round((sampleMatchCount / samplesA.length) * 100);
                 const namesSimilar = colA.columnName.trim().toLowerCase() === colB.columnName.trim().toLowerCase();
 
-                // RELAXED THRESHOLDS: 
-                // 70% threshold for general matches (was 90%)
-                // 40% threshold if names are identical (was 50%)
-                if (sampleMatchPct >= 70 || (namesSimilar && sampleMatchPct >= 40)) {
+                // LOGIC SPLIT: KEY CANDIDATE vs VALUE CANDIDATE
+                // User Request: "Find Reference Keys" strictly for unique non-duplicate values.
+
+                const uniquenessA = (colA.uniqueCount ?? 0) / Math.max(colA.rowCount ?? 1, 1);
+                const isKeyCandidate = uniquenessA > 0.95; // High uniqueness required for keys
+
+                let isMatch = false;
+
+                if (isKeyCandidate) {
+                    // KEY STRATEGY: Strict 97% match required to suggest as a JOIN KEY
+                    if (sampleMatchPct >= 97) {
+                        isMatch = true;
+                    }
+                } else {
+                    // VALUE STRATEGY: Relaxed thresholds allowed (for amounts, currencies, etc.)
+                    // 70% threshold for general matches
+                    // 40% threshold if names are identical
+                    if (sampleMatchPct >= 70 || (namesSimilar && sampleMatchPct >= 40)) {
+                        isMatch = true;
+                    }
+                }
+
+                if (isMatch) {
                     // To get exact commonValues for UI, we do a full intersect (only for likely candidates)
                     const overlapRes = await prisma.$queryRaw<Array<{ overlap_count: bigint }>>`
                         SELECT COUNT(*) as overlap_count
