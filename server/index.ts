@@ -808,8 +808,11 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
         // Track seen pairs to avoid duplicates
         const seenPairs = new Set<string>();
 
-        // For each column A, we check its samples against ALL other columns B
+        // For each column A (TARGET only), we check its samples against ALL other columns B
         for (const colA of columns) {
+            // Only take samples from TARGET tables - as requested by user
+            if (colA.tableType !== 'TARGET') continue;
+
             const samplesA = columnSamplesMap.get(colA.id);
             if (!samplesA || samplesA.length === 0) continue;
 
