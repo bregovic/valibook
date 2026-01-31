@@ -852,24 +852,29 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                 // User Request: "Find Reference Keys" strictly for unique non-duplicate values.
 
                 const uniquenessA = (colA.uniqueCount ?? 0) / Math.max(colA.rowCount ?? 1, 1);
-                const isKeyCandidate = uniquenessA > 0.95; // High uniqueness required for keys
+                // RELAXED UNIQUENESS: 80% is enough to be considered a potential key (allows for some dirty data)
+                const isKeyCandidate = uniquenessA > 0.80;
 
-                // FILTER BY MODE: Exclude candidates that don't match the requested mode
+                // FILTER BY MODE: 
+                // KEYS mode: Only show high-uniqueness candidates
+                // VALUES mode: Show everything that matches well (don't exclude keys, they can be values too)
                 if (mode === 'KEYS' && !isKeyCandidate) continue;
-                if (mode === 'VALUES' && isKeyCandidate) continue;
 
                 let isMatch = false;
 
                 if (isKeyCandidate) {
-                    // KEY STRATEGY: Strict 97% match required to suggest as a JOIN KEY
-                    if (sampleMatchPct >= 97) {
+                    // KEY STRATEGY: 90% match required (was 97%)
+                    if (sampleMatchPct >= 90) {
                         isMatch = true;
                     }
-                } else {
-                    // VALUE STRATEGY: Relaxed thresholds allowed (for amounts, currencies, etc.)
-                    // 70% threshold for general matches
-                    // 40% threshold if names are identical
-                    if (sampleMatchPct >= 70 || (namesSimilar && sampleMatchPct >= 40)) {
+                    // Fallback: If in KEYS mode, and match is very high (98%), accept even if uniqueness is lower (handled by isKeyCandidate check above)
+                }
+
+                if (!isKeyCandidate || mode === 'VALUES') {
+                    // VALUE STRATEGY: Relaxed thresholds
+                    // 60% threshold for general matches (was 70%)
+                    // 40% threshold if names match
+                    if (sampleMatchPct >= 60 || (namesSimilar && sampleMatchPct >= 40)) {
                         isMatch = true;
                     }
                 }

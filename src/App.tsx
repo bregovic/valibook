@@ -589,6 +589,8 @@ function App() {
     );
   };
 
+  const [manualLinkType, setManualLinkType] = useState<'KEY' | 'VALUE'>('KEY');
+
   // Create manual link
   const createManualLink = async () => {
     if (!manualLinkSource || !manualLinkTarget) return;
@@ -609,12 +611,21 @@ function App() {
 
     await setColumnLink(sourceCol.id, targetCol.id);
 
-    // Mark target as PK
-    await fetch(`${API_URL}/columns/${targetCol.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isPrimaryKey: true })
-    });
+    // Only mark target as PK if user selected 'Referenční klíč'
+    if (manualLinkType === 'KEY') {
+      await fetch(`${API_URL}/columns/${targetCol.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isPrimaryKey: true })
+      });
+    } else {
+      // Ensure it is NOT primary key if it's a value check
+      await fetch(`${API_URL}/columns/${targetCol.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isPrimaryKey: false })
+      });
+    }
 
     setShowManualLinkModal(false);
     setManualLinkSource(null);
@@ -1411,6 +1422,33 @@ function App() {
             boxShadow: '0 20px 40px rgba(0,0,0,0.3)'
           }}>
             <h3 style={{ marginBottom: '20px' }}>➕ Vytvořit ruční vazbu</h3>
+
+            {/* Link Type Selection */}
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', fontWeight: 500, marginBottom: '8px' }}>Typ vazby:</label>
+              <div style={{ display: 'flex', gap: '15px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="linkType"
+                    value="KEY"
+                    checked={manualLinkType === 'KEY'}
+                    onChange={() => setManualLinkType('KEY')}
+                  />
+                  <span>🔑 Referenční klíč (PK/FK)</span>
+                </label>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                  <input
+                    type="radio"
+                    name="linkType"
+                    value="VALUE"
+                    checked={manualLinkType === 'VALUE'}
+                    onChange={() => setManualLinkType('VALUE')}
+                  />
+                  <span>📋 Kontrola hodnoty (Value)</span>
+                </label>
+              </div>
+            </div>
 
             {/* Source selection */}
             <div style={{ marginBottom: '16px' }}>
