@@ -941,6 +941,7 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
             }
         }
     }
+}
 
 
 
@@ -951,10 +952,10 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
             // Sort by match count (highest first)
             suggestions.sort((a, b) => b.commonValues - a.commonValues || b.matchPercentage - a.matchPercentage);
 
-    res.json({
-        success: true,
-        suggestions: suggestions.slice(0, 100) // Limit to top 100
-    });
+res.json({
+    success: true,
+    suggestions: suggestions.slice(0, 100) // Limit to top 100
+});
 
 } catch (error) {
     console.error(error);
