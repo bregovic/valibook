@@ -844,11 +844,14 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                 const commonValues = Number(overlapRes[0].overlap_count);
                 if (commonValues < 5) continue; // Not enough overlap
 
-                // Calculate match percentage based on the smaller table's unique values or just use samples
-                // Let's use simpler logic for AI suggestion:
-                const matchPercentage = Math.round((commonValues / Math.max(colA.uniqueCount || 1, 1)) * 100);
+                const matchPctA = Math.round((commonValues / Math.max(colA.uniqueCount || 1, 1)) * 100);
+                const matchPctB = Math.round((commonValues / Math.max(colB.uniqueCount || 1, 1)) * 100);
+                const bestMatchPct = Math.max(matchPctA, matchPctB);
 
-                if (matchPercentage >= 90) {
+                // Logic: 
+                // 1. Either side matches 90%+ 
+                // 2. OR Names are same AND either side matches 60%+
+                if (bestMatchPct >= 90 || (namesSimilar && bestMatchPct >= 60)) {
                     // Check uniqueness: at least one side must have 90%+ unique values
                     const sourceUniqueRatio = (colA.uniqueCount ?? 0) / Math.max(colA.rowCount ?? 1, 1);
                     const targetUniqueRatio = (colB.uniqueCount ?? 0) / Math.max(colB.rowCount ?? 1, 1);
@@ -870,7 +873,7 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                                 targetColumnId: colA.id,
                                 targetColumn: colA.columnName,
                                 targetTable: colA.tableName,
-                                matchPercentage,
+                                matchPercentage: bestMatchPct,
                                 commonValues: commonValues,
                                 sampleSize: samplesA.length
                             });
@@ -882,7 +885,7 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                                 targetColumnId: colB.id,
                                 targetColumn: colB.columnName,
                                 targetTable: colB.tableName,
-                                matchPercentage,
+                                matchPercentage: bestMatchPct,
                                 commonValues: commonValues,
                                 sampleSize: samplesA.length
                             });
