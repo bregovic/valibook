@@ -936,14 +936,20 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
             }
         }
 
-        // Transitive range filter propagation (one level)
-        // If TabB links to TabA.ColX, and TabA.ColX defines a range scope, TabB inherits it.
+        // Recursive range filter propagation
+        // If TabC -> TabB -> TabA (Range), then TabC should also be filtered by Range.
         const extendedFilters = new Map(rangeFilters);
-        for (const col of allLinks) {
-            if (!extendedFilters.has(col.tableName)) {
-                const targetFilter = rangeFilters.get(col.linkedToColumn!.tableName);
-                if (targetFilter && targetFilter.colId === col.linkedToColumnId) {
-                    extendedFilters.set(col.tableName, { colId: col.id, rangeColId: targetFilter.rangeColId });
+        let changed = true;
+        while (changed) {
+            changed = false;
+            for (const col of allLinks) {
+                if (!extendedFilters.has(col.tableName)) {
+                    const targetFilter = extendedFilters.get(col.linkedToColumn!.tableName);
+                    // Only propagate if the link is to the same column that defines the range (or recursively through PKs)
+                    if (targetFilter && (targetFilter.colId === col.linkedToColumnId || col.linkedToColumn?.isPrimaryKey)) {
+                        extendedFilters.set(col.tableName, { colId: col.id, rangeColId: targetFilter.rangeColId });
+                        changed = true;
+                    }
                 }
             }
         }
@@ -1205,14 +1211,11 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
 
             // Process each forbidden column one by one to prevent timeout
             for (const fCol of forbiddenColumns) {
-                // Get count of forbidden values for logging
-                const forbiddenValueCount = await prisma.columnValue.count({
-                    where: { columnId: fCol.id, value: { not: '' } }
-                });
-                console.log(`[Forbidden Check] Processing: ${fCol.tableName}.${fCol.columnName} (${forbiddenValueCount} values)`);
-
                 // For each forbidden column, check against ALL candidate columns
                 for (const tCol of candidateColumns) {
+                    // Double check type to be 100% sure we skip SOURCE
+                    if (tCol.tableType !== 'TARGET') continue;
+
                     // Skip if same table
                     if (fCol.tableName === tCol.tableName) continue;
 
