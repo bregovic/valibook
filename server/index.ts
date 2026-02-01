@@ -997,6 +997,76 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
     }
 });
 
+// Function to get the row index with the most non-empty values
+async function getMostPopulatedRowIndex(columnIds: string[]): Promise<number | null> {
+    if (columnIds.length === 0) return null;
+
+    // This query counts non-empty values per rowIndex for the given columns
+    // and returns the rowIndex with the highest count.
+    const result = await prisma.$queryRawUnsafe<Array<{ rowIndex: number, c: bigint }>>(`
+        SELECT "rowIndex", COUNT(*) as c 
+        FROM "column_values" 
+        WHERE "columnId" IN (${columnIds.map((id, i) => `$${i + 1}`).join(',')}) 
+          AND value != '' AND value IS NOT NULL
+        GROUP BY "rowIndex" 
+        ORDER BY c DESC 
+        LIMIT 1
+    `, ...columnIds);
+
+    if (result && result.length > 0) {
+        return Number(result[0].rowIndex);
+    }
+    return 0; // Fallback to first row
+}
+
+// Endpoint to get a preview row for a specific table
+app.get('/api/projects/:projectId/tables/:tableName/preview-row', async (req, res) => {
+    const { projectId, tableName } = req.params;
+
+    try {
+        // 1. Get all columns for this table
+        const columns = await prisma.column.findMany({
+            where: { projectId, tableName }
+        });
+
+        if (columns.length === 0) {
+            return res.status(404).json({ error: "Table not found" });
+        }
+
+        const columnIds = columns.map(c => c.id);
+
+        // 2. Find the "best" row (most populated)
+        const rowIndex = await getMostPopulatedRowIndex(columnIds);
+
+        if (rowIndex === null) {
+            return res.json({ rowData: {}, columns, rowIndex: -1 });
+        }
+
+        // 3. Fetch values for that row
+        const values = await prisma.columnValue.findMany({
+            where: {
+                columnId: { in: columnIds },
+                rowIndex: rowIndex
+            }
+        });
+
+        // 4. Construct the response object: { [columnName]: value }
+        const rowData: Record<string, string> = {};
+        values.forEach(v => {
+            const col = columns.find(c => c.id === v.columnId);
+            if (col) {
+                rowData[col.id] = v.value; // Key by ID for reliable mapping
+            }
+        });
+
+        res.json({ rowData, columns, rowIndex });
+
+    } catch (error) {
+        console.error("Error fetching preview row:", error);
+        res.status(500).json({ error: "Failed to fetch preview row" });
+    }
+});
+
 // ============================================
 // VALIDATE PROJECT - Check FK integrity
 // ============================================
