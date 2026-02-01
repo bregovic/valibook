@@ -109,7 +109,7 @@ function App() {
   const [uploadType, setUploadType] = useState<'SOURCE' | 'TARGET' | 'FORBIDDEN' | 'RANGE'>('TARGET');
   const [linkSuggestions, setLinkSuggestions] = useState<LinkSuggestion[]>([]);
   const [selectedSuggestionIds, setSelectedSuggestionIds] = useState<Set<string>>(new Set());
-  const [detecting, setDetecting] = useState(false);
+  /* detecting removed */
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
   const [activeValidationTab, setActiveValidationTab] = useState<'SUMMARY' | 'INTEGRITY' | 'FORBIDDEN' | 'RULES' | 'RECONCILE' | 'PROTOCOL'>('SUMMARY');
@@ -880,14 +880,13 @@ function App() {
                           ✨ AI Pravidla
                         </button>
                       </div>
-                      {(detecting || validating) && (
+                      {validating && (
                         <div style={{ width: '100%', maxWidth: '300px' }}>
                           <div style={{
                             fontSize: '0.8rem',
                             color: '#666',
                             marginBottom: '4px'
                           }}>
-                            {detecting && 'Analyzuji vzorky dat...'}
                             {validating && 'Kontroluji integritu a zakázané hodnoty...'}
                           </div>
                           <div style={{
