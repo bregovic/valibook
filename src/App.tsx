@@ -109,7 +109,7 @@ function App() {
   const [uploadType, setUploadType] = useState<'SOURCE' | 'TARGET' | 'FORBIDDEN' | 'RANGE'>('TARGET');
   const [linkSuggestions, setLinkSuggestions] = useState<LinkSuggestion[]>([]);
   const [selectedSuggestionIds, setSelectedSuggestionIds] = useState<Set<string>>(new Set());
-  /* detecting removed */
+  const [detecting, setDetecting] = useState(false);
   const [validating, setValidating] = useState(false);
   const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
   const [activeValidationTab, setActiveValidationTab] = useState<'SUMMARY' | 'INTEGRITY' | 'FORBIDDEN' | 'RULES' | 'RECONCILE' | 'PROTOCOL'>('SUMMARY');
@@ -450,8 +450,7 @@ function App() {
     }
   };
 
-  /* REMOVED detectLinks (Replaced by VisualMapper) */
-  /*
+  // Detect links automatically
   const detectLinks = async (mode: 'KEYS' | 'VALUES') => {
     if (!selectedProject) return;
 
@@ -487,7 +486,6 @@ function App() {
       setDetecting(false);
     }
   };
-  */
 
   // Helpers for selection
   const getSuggestionKey = (s: LinkSuggestion) => `${s.sourceColumnId}-${s.targetColumnId}`;
@@ -842,51 +840,84 @@ function App() {
                           }}
                           onClick={() => setShowVisualMapper(true)}
                         >
-                          🔗 Kontrolované hodnoty
-                        </button>
-                        <button
-                          className="validate-btn"
-                          onClick={validateProject}
-                          disabled={validating}
-                        >
-                          {validating ? '⏳ Validuji...' : '✓ Validovat'}
-                        </button>
-                        <button
-                          style={{
-                            background: '#10b981',
-                            color: 'white',
-                            border: 'none',
-                            padding: '8px 16px',
-                            borderRadius: '6px',
-                            cursor: 'pointer',
-                            fontWeight: 500
-                          }}
-                          onClick={() => setShowManualLinkModal(true)}
-                        >
-                          ➕ Ruční vazba
-                        </button>
-                        <button
-                          style={{
-                            background: '#8b5cf6', // Violet
-                            color: 'white',
-                            border: 'none',
-                            padding: '8px 16px',
-                            borderRadius: '6px',
-                            cursor: 'pointer',
-                            fontWeight: 500
-                          }}
-                          onClick={() => setShowAIModal(true)}
-                        >
-                          ✨ AI Pravidla
-                        </button>
+                          <button
+                            className="detect-btn"
+                            style={{
+                              background: '#3b82f6',
+                              color: 'white',
+                              border: 'none',
+                              padding: '8px 16px',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              fontWeight: 500,
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px'
+                            }}
+                            onClick={() => setShowVisualMapper(true)}
+                          >
+                            🔗 Kontrolované hodnoty
+                          </button>
+                          <button
+                            className="detect-btn"
+                            style={{ background: '#f59e0b', borderColor: '#d97706' }}
+                            onClick={() => detectLinks('KEYS')}
+                            disabled={detecting}
+                          >
+                            {detecting ? '🔍 ...' : '🔑 Najít Klíče'}
+                          </button>
+                          <button
+                            className="detect-btn"
+                            onClick={() => detectLinks('VALUES')}
+                            disabled={detecting}
+                          >
+                            {detecting ? '🔍 ...' : '📋 Najít Hodnoty'}
+                          </button>
+                          <button
+                            className="validate-btn"
+                            onClick={validateProject}
+                            disabled={validating}
+                          >
+                            {validating ? '⏳ Validuji...' : '✓ Validovat'}
+                          </button>
+                          <button
+                            style={{
+                              background: '#10b981',
+                              color: 'white',
+                              border: 'none',
+                              padding: '8px 16px',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              fontWeight: 500
+                            }}
+                            onClick={() => setShowManualLinkModal(true)}
+                          >
+                            ➕ Ruční vazba
+                          </button>
+                          <button
+                            style={{
+                              background: '#8b5cf6', // Violet
+                              color: 'white',
+                              border: 'none',
+                              padding: '8px 16px',
+                              borderRadius: '6px',
+                              cursor: 'pointer',
+                              fontWeight: 500
+                            }}
+                            onClick={() => setShowAIModal(true)}
+                          >
+                            ✨ AI Pravidla
+                          </button>
                       </div>
-                      {validating && (
+                      {(validating || detecting) && (
                         <div style={{ width: '100%', maxWidth: '300px' }}>
                           <div style={{
                             fontSize: '0.8rem',
                             color: '#666',
                             marginBottom: '4px'
                           }}>
+                          }}>
+                            {detecting && 'Analyzuji vzorky dat...'}
                             {validating && 'Kontroluji integritu a zakázané hodnoty...'}
                           </div>
                           <div style={{
