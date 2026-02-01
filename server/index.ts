@@ -998,11 +998,41 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
 });
 
 // Function to get the row index with the most non-empty values
-async function getMostPopulatedRowIndex(columnIds: string[]): Promise<number | null> {
+// Function to get the row index with optionally filtering or random selection
+async function getMostPopulatedRowIndex(columnIds: string[], lookupColId?: string, lookupValue?: string, random: boolean = false): Promise<number | null> {
     if (columnIds.length === 0) return null;
 
-    // This query counts non-empty values per rowIndex for the given columns
-    // and returns the rowIndex with the highest count.
+    // Use parameterized queries strictly for safety
+    if (lookupColId && lookupValue) {
+        // Find row where specific column has value
+        const result = await prisma.$queryRawUnsafe<Array<{ rowIndex: number }>>(`
+            SELECT "rowIndex" 
+            FROM "column_values" 
+            WHERE "columnId" = $1 AND value = $2
+            LIMIT 1
+        `, lookupColId, lookupValue);
+
+        if (result && result.length > 0) return Number(result[0].rowIndex);
+        return null; // Value not found
+    }
+
+    if (random) {
+        // Get a random row ID from the first column (assuming all cols have same rows)
+        // We use TABLESAMPLE or just ORDER BY RANDOM() LIMIT 1. 
+        // For compatibility and simplicity on small-medium datasets, ORDER BY RANDOM() is okay.
+        // But we need to select FROM a specific column to get valid rowIndexes.
+        const result = await prisma.$queryRawUnsafe<Array<{ rowIndex: number }>>(`
+            SELECT "rowIndex" 
+            FROM "column_values" 
+            WHERE "columnId" = $1 
+            ORDER BY RANDOM() 
+            LIMIT 1
+        `, columnIds[0]);
+        if (result && result.length > 0) return Number(result[0].rowIndex);
+        return 0;
+    }
+
+    // Default: Most populated row
     const result = await prisma.$queryRawUnsafe<Array<{ rowIndex: number, c: bigint }>>(`
         SELECT "rowIndex", COUNT(*) as c 
         FROM "column_values" 
@@ -1035,31 +1065,54 @@ app.get('/api/projects/:projectId/tables/:tableName/preview-row', async (req, re
 
         const columnIds = columns.map(c => c.id);
 
-        // 2. Find the "best" row (most populated)
-        const rowIndex = await getMostPopulatedRowIndex(columnIds);
+        // Parse query params
+        const lookupColId = req.query.lookupCol as string;
+        const lookupValue = req.query.lookupValue as string;
+        const random = req.query.random === 'true';
+
+        // 2. Find the "best" row (most populated, random, or specific lookup)
+        const rowIndex = await getMostPopulatedRowIndex(columnIds, lookupColId, lookupValue, random);
 
         if (rowIndex === null) {
-            return res.json({ rowData: {}, columns, rowIndex: -1 });
+            return res.json({
+                tableName,
+                columns: columns.map(c => ({
+                    id: c.id,
+                    columnName: c.columnName,
+                    sampleValue: null
+                })),
+                rowData: {},
+                rowIndex: -1,
+                found: false
+            });
         }
 
-        // 3. Fetch values for that row
-        const values = await prisma.columnValue.findMany({
+        const rowValues = await prisma.columnValue.findMany({
             where: {
                 columnId: { in: columnIds },
                 rowIndex: rowIndex
             }
         });
 
-        // 4. Construct the response object: { [columnName]: value }
-        const rowData: Record<string, string> = {};
-        values.forEach(v => {
+        // 4. Construct the response object: { [columnId]: value }
+        const rowMap: Record<string, string> = {};
+        rowValues.forEach(v => {
             const col = columns.find(c => c.id === v.columnId);
             if (col) {
-                rowData[col.id] = v.value; // Key by ID for reliable mapping
+                rowMap[col.id] = v.value; // Key by ID for reliable mapping
             }
         });
 
-        res.json({ rowData, columns, rowIndex });
+        res.json({
+            tableName,
+            columns: columns.map(c => ({
+                id: c.id,
+                columnName: c.columnName,
+            })),
+            rowData: rowMap,
+            rowIndex,
+            found: true
+        });
 
     } catch (error) {
         console.error("Error fetching preview row:", error);

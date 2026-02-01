@@ -30,6 +30,7 @@ export default function VisualMapperModal({ projectId, tables, onClose, onSave }
     const [sourcePreview, setSourcePreview] = useState<TablePreview | null>(null);
     const [targetPreview, setTargetPreview] = useState<TablePreview | null>(null);
     const [loading, setLoading] = useState(false);
+    const [loadingSource, setLoadingSource] = useState(false);
 
     // Mapping state
     const [selectedSourceCol, setSelectedSourceCol] = useState<string | null>(null);
@@ -42,22 +43,13 @@ export default function VisualMapperModal({ projectId, tables, onClose, onSave }
         }
     }, [sourceTable, targetTable]);
 
-    const loadPreviews = async () => {
+    const loadPreviews = async (randomTarget = false) => {
         setLoading(true);
         try {
-            const [srcRes, tgtRes] = await Promise.all([
-                fetch(`/api/projects/${projectId}/tables/${sourceTable}/preview-row`),
-                fetch(`/api/projects/${projectId}/tables/${targetTable}/preview-row`)
-            ]);
-
-            const srcData = await srcRes.json();
+            // 1. Fetch Target Preview (Controlled Table) - potentially random
+            const tgtUrl = `/api/projects/${projectId}/tables/${targetTable}/preview-row` + (randomTarget ? '?random=true' : '');
+            const tgtRes = await fetch(tgtUrl);
             const tgtData = await tgtRes.json();
-
-            setSourcePreview({
-                tableName: sourceTable,
-                columns: srcData.columns,
-                rowData: srcData.rowData
-            });
 
             setTargetPreview({
                 tableName: targetTable,
@@ -65,9 +57,11 @@ export default function VisualMapperModal({ projectId, tables, onClose, onSave }
                 rowData: tgtData.rowData
             });
 
-            // Clear previous selections
-            setMappings([]);
-            setSelectedSourceCol(null);
+            // 2. Fetch Source Preview (Reference Table)
+            // If we have mappings, try to find a matching row in Source based on Target's data
+            // Otherwise, just get a representative row.
+            // We need to do this AFTER setting targetPreview, but in this async flow we have tgtData.
+            await syncSourcePreview(tgtData.rowData, mappings); // Pass current mappings? Or use state? Use active mappings.
 
         } catch (e) {
             console.error(e);
@@ -76,6 +70,46 @@ export default function VisualMapperModal({ projectId, tables, onClose, onSave }
             setLoading(false);
         }
     };
+
+    // Helper to fetch Source row based on current Target row and Mappings
+    const syncSourcePreview = async (targetRowData: Record<string, string>, currentMappings: typeof mappings) => {
+        setLoadingSource(true);
+        try {
+            let lookupParams = '';
+
+            // Find first active mapping that has a value in the current target row
+            const activeMapping = currentMappings.find(m => targetRowData[m.targetColId]);
+
+            if (activeMapping) {
+                const val = targetRowData[activeMapping.targetColId];
+                if (val) {
+                    lookupParams = `?lookupCol=${activeMapping.sourceColId}&lookupValue=${encodeURIComponent(val)}`;
+                }
+            }
+
+            const srcRes = await fetch(`/api/projects/${projectId}/tables/${sourceTable}/preview-row${lookupParams}`);
+            const srcData = await srcRes.json();
+
+            setSourcePreview({
+                tableName: sourceTable,
+                columns: srcData.columns,
+                rowData: srcData.rowData
+            });
+        } catch (e) {
+            console.error("Failed to sync source", e);
+        } finally {
+            setLoadingSource(false);
+        }
+    };
+
+    // Re-sync source when mappings change or when target preview changes (handled in effective way)
+    // Actually, createManualLink logic is: Add mapping -> Trigger sync?
+    useEffect(() => {
+        if (targetPreview && sourceTable) {
+            syncSourcePreview(targetPreview.rowData, mappings);
+        }
+    }, [mappings.length]); // Re-sync when number of mappings changes (e.g. added new one)
+
 
     const handleSourceClick = (colId: string) => {
         setSelectedSourceCol(colId);
@@ -265,9 +299,14 @@ export default function VisualMapperModal({ projectId, tables, onClose, onSave }
             ) : (
                 <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
                     {/* Left Column (Reference) */}
-                    <div style={{ flex: 1, overflowY: 'auto', borderRight: '1px solid #e2e8f0', background: '#fff' }}>
-                        <div style={{ padding: '12px', background: '#f1f5f9', fontWeight: 600, position: 'sticky', top: 0, borderBottom: '1px solid #e2e8f0' }}>
-                            Sloupce: {sourcePreview.tableName} (Zdroj)
+                    <div style={{ flex: 1, overflowY: 'auto', borderRight: '1px solid #e2e8f0', background: loadingSource ? '#f8fafc' : '#fff' }}>
+                        <div style={{
+                            padding: '12px', background: '#f1f5f9', fontWeight: 600,
+                            position: 'sticky', top: 0, borderBottom: '1px solid #e2e8f0',
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                        }}>
+                            <span>Sloupce: {sourcePreview.tableName} (Zdroj)</span>
+                            {loadingSource && <span style={{ fontSize: '0.8rem', color: '#64748b' }}>Načítám...</span>}
                         </div>
                         {sourcePreview.columns.map(col => (
                             <div
@@ -329,8 +368,21 @@ export default function VisualMapperModal({ projectId, tables, onClose, onSave }
 
                     {/* Right Column (Checked) */}
                     <div style={{ flex: 1, overflowY: 'auto', background: '#fff' }}>
-                        <div style={{ padding: '12px', background: '#f1f5f9', fontWeight: 600, position: 'sticky', top: 0, borderBottom: '1px solid #e2e8f0' }}>
-                            Sloupce: {targetPreview.tableName} (Cíl)
+                        <div style={{
+                            padding: '12px', background: '#f1f5f9', fontWeight: 600,
+                            position: 'sticky', top: 0, borderBottom: '1px solid #e2e8f0',
+                            display: 'flex', justifyContent: 'space-between', alignItems: 'center'
+                        }}>
+                            <span>Sloupce: {targetPreview.tableName} (Cíl)</span>
+                            <button
+                                onClick={() => loadPreviews(true)}
+                                style={{
+                                    fontSize: '0.8rem', padding: '4px 8px', background: 'white',
+                                    border: '1px solid #cbd5e1', borderRadius: '4px', cursor: 'pointer'
+                                }}
+                            >
+                                🎲 Další vzorek
+                            </button>
                         </div>
                         {targetPreview.columns.map(col => {
                             const isMapped = mappings.some(m => m.targetColId === col.id);
