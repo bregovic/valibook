@@ -840,82 +840,64 @@ function App() {
                           }}
                           onClick={() => setShowVisualMapper(true)}
                         >
-                          <button
-                            className="detect-btn"
-                            style={{
-                              background: '#3b82f6',
-                              color: 'white',
-                              border: 'none',
-                              padding: '8px 16px',
-                              borderRadius: '6px',
-                              cursor: 'pointer',
-                              fontWeight: 500,
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '6px'
-                            }}
-                            onClick={() => setShowVisualMapper(true)}
-                          >
-                            🔗 Kontrolované hodnoty
-                          </button>
-                          <button
-                            className="detect-btn"
-                            style={{ background: '#f59e0b', borderColor: '#d97706' }}
-                            onClick={() => detectLinks('KEYS')}
-                            disabled={detecting}
-                          >
-                            {detecting ? '🔍 ...' : '🔑 Najít Klíče'}
-                          </button>
-                          <button
-                            className="detect-btn"
-                            onClick={() => detectLinks('VALUES')}
-                            disabled={detecting}
-                          >
-                            {detecting ? '🔍 ...' : '📋 Najít Hodnoty'}
-                          </button>
-                          <button
-                            className="validate-btn"
-                            onClick={validateProject}
-                            disabled={validating}
-                          >
-                            {validating ? '⏳ Validuji...' : '✓ Validovat'}
-                          </button>
-                          <button
-                            style={{
-                              background: '#10b981',
-                              color: 'white',
-                              border: 'none',
-                              padding: '8px 16px',
-                              borderRadius: '6px',
-                              cursor: 'pointer',
-                              fontWeight: 500
-                            }}
-                            onClick={() => setShowManualLinkModal(true)}
-                          >
-                            ➕ Ruční vazba
-                          </button>
-                          <button
-                            style={{
-                              background: '#8b5cf6', // Violet
-                              color: 'white',
-                              border: 'none',
-                              padding: '8px 16px',
-                              borderRadius: '6px',
-                              cursor: 'pointer',
-                              fontWeight: 500
-                            }}
-                            onClick={() => setShowAIModal(true)}
-                          >
-                            ✨ AI Pravidla
-                          </button>
+                          🔗 Kontrolované hodnoty
+                        </button>
+                        <button
+                          className="detect-btn"
+                          style={{ background: '#f59e0b', borderColor: '#d97706' }}
+                          onClick={() => detectLinks('KEYS')}
+                          disabled={detecting}
+                        >
+                          {detecting ? '🔍 ...' : '🔑 Najít Klíče'}
+                        </button>
+                        <button
+                          className="detect-btn"
+                          onClick={() => detectLinks('VALUES')}
+                          disabled={detecting}
+                        >
+                          {detecting ? '🔍 ...' : '📋 Najít Hodnoty'}
+                        </button>
+                        <button
+                          className="validate-btn"
+                          onClick={validateProject}
+                          disabled={validating}
+                        >
+                          {validating ? '⏳ Validuji...' : '✓ Validovat'}
+                        </button>
+                        <button
+                          style={{
+                            background: '#10b981',
+                            color: 'white',
+                            border: 'none',
+                            padding: '8px 16px',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            fontWeight: 500
+                          }}
+                          onClick={() => setShowManualLinkModal(true)}
+                        >
+                          ➕ Ruční vazba
+                        </button>
+                        <button
+                          style={{
+                            background: '#8b5cf6', // Violet
+                            color: 'white',
+                            border: 'none',
+                            padding: '8px 16px',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            fontWeight: 500
+                          }}
+                          onClick={() => setShowAIModal(true)}
+                        >
+                          ✨ AI Pravidla
+                        </button>
                       </div>
                       {(validating || detecting) && (
                         <div style={{ width: '100%', maxWidth: '300px' }}>
                           <div style={{
                             fontSize: '0.8rem',
                             color: '#666',
-                            marginBottom: '4px'
-                          }}>
                           }}>
                             {detecting && 'Analyzuji vzorky dat...'}
                             {validating && 'Kontroluji integritu a zakázané hodnoty...'}
@@ -1460,387 +1442,397 @@ function App() {
       </div>
 
       {/* Manual Link Modal */}
-      {showManualLinkModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0,0,0,0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000
-        }}>
+      {
+        showManualLinkModal && (
           <div style={{
-            background: 'white',
-            borderRadius: '12px',
-            padding: '24px',
-            width: '400px',
-            maxWidth: '90vw',
-            boxShadow: '0 20px 40px rgba(0,0,0,0.3)'
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 1000
           }}>
-            <h3 style={{ marginBottom: '20px' }}>➕ Vytvořit ruční vazbu</h3>
+            <div style={{
+              background: 'white',
+              borderRadius: '12px',
+              padding: '24px',
+              width: '400px',
+              maxWidth: '90vw',
+              boxShadow: '0 20px 40px rgba(0,0,0,0.3)'
+            }}>
+              <h3 style={{ marginBottom: '20px' }}>➕ Vytvořit ruční vazbu</h3>
 
-            {/* Link Type Selection */}
-            <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', fontWeight: 500, marginBottom: '8px' }}>Typ vazby:</label>
-              <div style={{ display: 'flex', gap: '15px' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
-                  <input
-                    type="radio"
-                    name="linkType"
-                    value="KEY"
-                    checked={manualLinkType === 'KEY'}
-                    onChange={() => setManualLinkType('KEY')}
-                  />
-                  <span>🔑 Referenční klíč (PK/FK)</span>
+              {/* Link Type Selection */}
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ display: 'block', fontWeight: 500, marginBottom: '8px' }}>Typ vazby:</label>
+                <div style={{ display: 'flex', gap: '15px' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="linkType"
+                      value="KEY"
+                      checked={manualLinkType === 'KEY'}
+                      onChange={() => setManualLinkType('KEY')}
+                    />
+                    <span>🔑 Referenční klíč (PK/FK)</span>
+                  </label>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
+                    <input
+                      type="radio"
+                      name="linkType"
+                      value="VALUE"
+                      checked={manualLinkType === 'VALUE'}
+                      onChange={() => setManualLinkType('VALUE')}
+                    />
+                    <span>📋 Kontrola hodnoty (Value)</span>
+                  </label>
+                </div>
+              </div>
+
+              {/* Source selection */}
+              <div style={{ marginBottom: '16px' }}>
+                <label style={{ display: 'block', fontWeight: 500, marginBottom: '6px' }}>
+                  Zdrojový sloupec (FK):
                 </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
-                  <input
-                    type="radio"
-                    name="linkType"
-                    value="VALUE"
-                    checked={manualLinkType === 'VALUE'}
-                    onChange={() => setManualLinkType('VALUE')}
-                  />
-                  <span>📋 Kontrola hodnoty (Value)</span>
+                <select
+                  style={{ width: '100%', padding: '8px', marginBottom: '8px', boxSizing: 'border-box' }}
+                  value={manualLinkSource?.table || ''}
+                  onChange={(e) => setManualLinkSource({ table: e.target.value, column: '' })}
+                >
+                  <option value="">-- Vyberte tabulku --</option>
+                  {tables.map(t => (
+                    <option key={t.tableName} value={t.tableName}>{t.tableName}</option>
+                  ))}
+                </select>
+                <select
+                  style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                  value={manualLinkSource?.column || ''}
+                  onChange={(e) => setManualLinkSource(prev => prev ? { ...prev, column: e.target.value } : null)}
+                  disabled={!manualLinkSource?.table}
+                >
+                  <option value="">-- Vyberte sloupec --</option>
+                  {manualLinkSource?.table && tables
+                    .find(t => t.tableName === manualLinkSource.table)
+                    ?.columns.map(c => (
+                      <option key={c.id} value={c.columnName}>{c.columnName}</option>
+                    ))
+                  }
+                </select>
+              </div>
+
+              {/* Target selection */}
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ display: 'block', fontWeight: 500, marginBottom: '6px' }}>
+                  Cílový sloupec (PK):
                 </label>
+                <select
+                  style={{ width: '100%', padding: '8px', marginBottom: '8px', boxSizing: 'border-box' }}
+                  value={manualLinkTarget?.table || ''}
+                  onChange={(e) => setManualLinkTarget({ table: e.target.value, column: '' })}
+                >
+                  <option value="">-- Vyberte tabulku --</option>
+                  {tables.map(t => (
+                    <option key={t.tableName} value={t.tableName}>{t.tableName}</option>
+                  ))}
+                </select>
+                <select
+                  style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
+                  value={manualLinkTarget?.column || ''}
+                  onChange={(e) => setManualLinkTarget(prev => prev ? { ...prev, column: e.target.value } : null)}
+                  disabled={!manualLinkTarget?.table}
+                >
+                  <option value="">-- Vyberte sloupec --</option>
+                  {manualLinkTarget?.table && tables
+                    .find(t => t.tableName === manualLinkTarget.table)
+                    ?.columns.map(c => (
+                      <option key={c.id} value={c.columnName}>{c.columnName}</option>
+                    ))
+                  }
+                </select>
+              </div>
+
+              {/* Actions */}
+              <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                <button
+                  style={{
+                    padding: '10px 20px',
+                    border: '1px solid #ddd',
+                    borderRadius: '6px',
+                    background: 'white',
+                    cursor: 'pointer'
+                  }}
+                  onClick={() => {
+                    setShowManualLinkModal(false);
+                    setManualLinkSource(null);
+                    setManualLinkTarget(null);
+                  }}
+                >
+                  Zrušit
+                </button>
+                <button
+                  style={{
+                    padding: '10px 20px',
+                    border: 'none',
+                    borderRadius: '6px',
+                    background: '#10b981',
+                    color: 'white',
+                    cursor: 'pointer',
+                    fontWeight: 500
+                  }}
+                  onClick={createManualLink}
+                  disabled={!manualLinkSource?.column || !manualLinkTarget?.column}
+                >
+                  ✓ Vytvořit vazbu
+                </button>
               </div>
             </div>
-
-            {/* Source selection */}
-            <div style={{ marginBottom: '16px' }}>
-              <label style={{ display: 'block', fontWeight: 500, marginBottom: '6px' }}>
-                Zdrojový sloupec (FK):
-              </label>
-              <select
-                style={{ width: '100%', padding: '8px', marginBottom: '8px', boxSizing: 'border-box' }}
-                value={manualLinkSource?.table || ''}
-                onChange={(e) => setManualLinkSource({ table: e.target.value, column: '' })}
-              >
-                <option value="">-- Vyberte tabulku --</option>
-                {tables.map(t => (
-                  <option key={t.tableName} value={t.tableName}>{t.tableName}</option>
-                ))}
-              </select>
-              <select
-                style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
-                value={manualLinkSource?.column || ''}
-                onChange={(e) => setManualLinkSource(prev => prev ? { ...prev, column: e.target.value } : null)}
-                disabled={!manualLinkSource?.table}
-              >
-                <option value="">-- Vyberte sloupec --</option>
-                {manualLinkSource?.table && tables
-                  .find(t => t.tableName === manualLinkSource.table)
-                  ?.columns.map(c => (
-                    <option key={c.id} value={c.columnName}>{c.columnName}</option>
-                  ))
-                }
-              </select>
-            </div>
-
-            {/* Target selection */}
-            <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', fontWeight: 500, marginBottom: '6px' }}>
-                Cílový sloupec (PK):
-              </label>
-              <select
-                style={{ width: '100%', padding: '8px', marginBottom: '8px', boxSizing: 'border-box' }}
-                value={manualLinkTarget?.table || ''}
-                onChange={(e) => setManualLinkTarget({ table: e.target.value, column: '' })}
-              >
-                <option value="">-- Vyberte tabulku --</option>
-                {tables.map(t => (
-                  <option key={t.tableName} value={t.tableName}>{t.tableName}</option>
-                ))}
-              </select>
-              <select
-                style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
-                value={manualLinkTarget?.column || ''}
-                onChange={(e) => setManualLinkTarget(prev => prev ? { ...prev, column: e.target.value } : null)}
-                disabled={!manualLinkTarget?.table}
-              >
-                <option value="">-- Vyberte sloupec --</option>
-                {manualLinkTarget?.table && tables
-                  .find(t => t.tableName === manualLinkTarget.table)
-                  ?.columns.map(c => (
-                    <option key={c.id} value={c.columnName}>{c.columnName}</option>
-                  ))
-                }
-              </select>
-            </div>
-
-            {/* Actions */}
-            <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
-              <button
-                style={{
-                  padding: '10px 20px',
-                  border: '1px solid #ddd',
-                  borderRadius: '6px',
-                  background: 'white',
-                  cursor: 'pointer'
-                }}
-                onClick={() => {
-                  setShowManualLinkModal(false);
-                  setManualLinkSource(null);
-                  setManualLinkTarget(null);
-                }}
-              >
-                Zrušit
-              </button>
-              <button
-                style={{
-                  padding: '10px 20px',
-                  border: 'none',
-                  borderRadius: '6px',
-                  background: '#10b981',
-                  color: 'white',
-                  cursor: 'pointer',
-                  fontWeight: 500
-                }}
-                onClick={createManualLink}
-                disabled={!manualLinkSource?.column || !manualLinkTarget?.column}
-              >
-                ✓ Vytvořit vazbu
-              </button>
-            </div>
           </div>
-        </div>
-      )}
+        )
+      }
 
       {/* Settings Modal */}
-      {showSettingsModal && (
-        <div style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1100
-        }}>
+      {
+        showSettingsModal && (
           <div style={{
-            background: 'white', padding: '24px', borderRadius: '12px', width: '400px', maxWidth: '90%',
-            boxShadow: '0 4px 20px rgba(0,0,0,0.2)'
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1100
           }}>
-            <h3 style={{ margin: '0 0 16px', color: '#1f2937' }}>⚙️ Globální Nastavení</h3>
-            <div style={{ marginBottom: '15px' }}>
-              <label style={{ display: 'block', marginBottom: '4px', fontWeight: 500 }}>OpenAI API Key</label>
-              <input
-                type="password"
-                placeholder={hasSystemKey ? "******** (Nastaveno)" : "sk-..."}
-                value={newSystemKey}
-                onChange={e => setNewSystemKey(e.target.value)}
-                style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }}
-              />
-              <small style={{ color: '#666', display: 'block', marginTop: '4px' }}>
-                Klíč bude bezpečně uložen v databázi a nebude se zobrazovat v UI.
-              </small>
-            </div>
-            <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', marginBottom: '4px', fontWeight: 500 }}>Potvrzení heslem</label>
-              <input
-                type="password"
-                placeholder="Heslo"
-                value={aiPassword}
-                onChange={e => setAiPassword(e.target.value)}
-                style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }}
-              />
-            </div>
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-              <button
-                onClick={() => setShowSettingsModal(false)}
-                style={{ padding: '8px 16px', background: '#f3f4f6', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
-              >
-                Zavřít
-              </button>
-              <button
-                onClick={saveSettings}
-                style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer' }}
-              >
-                Uložit nastavení
-              </button>
+            <div style={{
+              background: 'white', padding: '24px', borderRadius: '12px', width: '400px', maxWidth: '90%',
+              boxShadow: '0 4px 20px rgba(0,0,0,0.2)'
+            }}>
+              <h3 style={{ margin: '0 0 16px', color: '#1f2937' }}>⚙️ Globální Nastavení</h3>
+              <div style={{ marginBottom: '15px' }}>
+                <label style={{ display: 'block', marginBottom: '4px', fontWeight: 500 }}>OpenAI API Key</label>
+                <input
+                  type="password"
+                  placeholder={hasSystemKey ? "******** (Nastaveno)" : "sk-..."}
+                  value={newSystemKey}
+                  onChange={e => setNewSystemKey(e.target.value)}
+                  style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }}
+                />
+                <small style={{ color: '#666', display: 'block', marginTop: '4px' }}>
+                  Klíč bude bezpečně uložen v databázi a nebude se zobrazovat v UI.
+                </small>
+              </div>
+              <div style={{ marginBottom: '20px' }}>
+                <label style={{ display: 'block', marginBottom: '4px', fontWeight: 500 }}>Potvrzení heslem</label>
+                <input
+                  type="password"
+                  placeholder="Heslo"
+                  value={aiPassword}
+                  onChange={e => setAiPassword(e.target.value)}
+                  style={{ width: '100%', padding: '8px', border: '1px solid #ddd', borderRadius: '4px' }}
+                />
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
+                <button
+                  onClick={() => setShowSettingsModal(false)}
+                  style={{ padding: '8px 16px', background: '#f3f4f6', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+                >
+                  Zavřít
+                </button>
+                <button
+                  onClick={saveSettings}
+                  style={{ background: '#3b82f6', color: 'white', border: 'none', padding: '8px 16px', borderRadius: '6px', cursor: 'pointer' }}
+                >
+                  Uložit nastavení
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      }
 
       {/* AI Rules Modal */}
-      {showAIModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0,0,0,0.5)',
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          zIndex: 1000
-        }}>
+      {
+        showAIModal && (
           <div style={{
-            background: 'white',
-            padding: '24px',
-            borderRadius: '12px',
-            width: '400px',
-            maxWidth: '90%',
-            boxShadow: '0 4px 20px rgba(0,0,0,0.2)'
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 1000
           }}>
-            <h3 style={{ margin: '0 0 16px', color: '#1f2937' }}>✨ AI Návrh Pravidel</h3>
+            <div style={{
+              background: 'white',
+              padding: '24px',
+              borderRadius: '12px',
+              width: '400px',
+              maxWidth: '90%',
+              boxShadow: '0 4px 20px rgba(0,0,0,0.2)'
+            }}>
+              <h3 style={{ margin: '0 0 16px', color: '#1f2937' }}>✨ AI Návrh Pravidel</h3>
 
-            {!aiResult || aiResult.startsWith('Analyzuji') ? (
-              <>
-                <p style={{ margin: '0 0 12px', color: '#4b5563', fontSize: '0.9rem' }}>
-                  Analýza struktury a generování pravidel probíhá pomocí OpenAI.
-                </p>
+              {!aiResult || aiResult.startsWith('Analyzuji') ? (
+                <>
+                  <p style={{ margin: '0 0 12px', color: '#4b5563', fontSize: '0.9rem' }}>
+                    Analýza struktury a generování pravidel probíhá pomocí OpenAI.
+                  </p>
 
-                <div style={{ marginBottom: '12px' }}>
-                  <label style={{ display: 'block', marginBottom: '4px', fontSize: '0.85rem', fontWeight: 500 }}>Stav API Klíče</label>
-                  {hasSystemKey ? (
-                    <div style={{ padding: '8px', background: '#d1fae5', color: '#065f46', borderRadius: '6px', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      ✅ Klíč je nastaven v systému.
-                    </div>
-                  ) : (
-                    <div style={{ padding: '8px', background: '#fee2e2', color: '#b91c1c', borderRadius: '6px', fontSize: '0.9rem' }}>
-                      ⚠️ Chybí API Klíč! Nastavte ho v ⚙️ Nastavení (ikona vpravo nahoře).
-                    </div>
-                  )}
-                </div>
+                  <div style={{ marginBottom: '12px' }}>
+                    <label style={{ display: 'block', marginBottom: '4px', fontSize: '0.85rem', fontWeight: 500 }}>Stav API Klíče</label>
+                    {hasSystemKey ? (
+                      <div style={{ padding: '8px', background: '#d1fae5', color: '#065f46', borderRadius: '6px', fontSize: '0.9rem', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        ✅ Klíč je nastaven v systému.
+                      </div>
+                    ) : (
+                      <div style={{ padding: '8px', background: '#fee2e2', color: '#b91c1c', borderRadius: '6px', fontSize: '0.9rem' }}>
+                        ⚠️ Chybí API Klíč! Nastavte ho v ⚙️ Nastavení (ikona vpravo nahoře).
+                      </div>
+                    )}
+                  </div>
 
-                <div style={{ marginBottom: '20px' }}>
-                  <label style={{ display: 'block', marginBottom: '4px', fontSize: '0.85rem', fontWeight: 500 }}>Bezpečnostní heslo</label>
-                  <input
-                    type="password"
-                    value={aiPassword}
-                    onChange={(e) => setAiPassword(e.target.value)}
-                    placeholder="Heslo"
-                    style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #d1d5db' }}
-                  />
-                </div>
+                  <div style={{ marginBottom: '20px' }}>
+                    <label style={{ display: 'block', marginBottom: '4px', fontSize: '0.85rem', fontWeight: 500 }}>Bezpečnostní heslo</label>
+                    <input
+                      type="password"
+                      value={aiPassword}
+                      onChange={(e) => setAiPassword(e.target.value)}
+                      placeholder="Heslo"
+                      style={{ width: '100%', padding: '8px', borderRadius: '6px', border: '1px solid #d1d5db' }}
+                    />
+                  </div>
 
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
-                  <button
-                    onClick={() => setShowAIModal(false)}
-                    style={{ padding: '8px 16px', background: '#f3f4f6', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
-                    disabled={generatingAI}
-                  >
-                    Zrušit
-                  </button>
-                  <button
-                    onClick={generateAIRules}
-                    disabled={generatingAI || !hasSystemKey}
-                    style={{
-                      padding: '8px 16px',
-                      background: (generatingAI || !hasSystemKey) ? '#9ca3af' : '#8b5cf6',
-                      color: 'white',
-                      border: 'none',
-                      borderRadius: '6px',
-                      cursor: (generatingAI || !hasSystemKey) ? 'not-allowed' : 'pointer'
-                    }}
-                  >
-                    {generatingAI ? 'Generuji...' : '✨ Vygenerovat'}
-                  </button>
-                </div>
-              </>
-            ) : (
-              <div style={{ textAlign: 'center' }}>
-                <p style={{ marginBottom: '20px', fontSize: '1.1rem', color: aiResult.startsWith('✅') ? 'green' : 'red' }}>
-                  {aiResult}
-                </p>
-                <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
-                  <button
-                    onClick={() => { setShowAIModal(false); setAiResult(''); }}
-                    style={{ padding: '8px 16px', background: '#f3f4f6', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
-                  >
-                    Zavřít
-                  </button>
-                  {aiResult.startsWith('❌') && (
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px' }}>
                     <button
-                      onClick={() => setAiResult('')}
-                      style={{ padding: '8px 16px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+                      onClick={() => setShowAIModal(false)}
+                      style={{ padding: '8px 16px', background: '#f3f4f6', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+                      disabled={generatingAI}
                     >
-                      Zkusit znovu
+                      Zrušit
                     </button>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Rule Failure Modal */}
-      {showRuleFailureModal && (
-        <div className="modal-overlay" style={{
-          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-          background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center',
-          alignItems: 'center', zIndex: 1100
-        }}>
-          <div style={{
-            background: 'white', padding: '24px', borderRadius: '12px',
-            width: '800px', maxWidth: '95%', maxHeight: '80vh', display: 'flex', flexDirection: 'column',
-            boxShadow: '0 4px 20px rgba(0,0,0,0.2)'
-          }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
-              <h3 style={{ margin: 0 }}>🔍 Detailní výpis chyb: {activeRuleTitle}</h3>
-              <button
-                onClick={() => setShowRuleFailureModal(false)}
-                style={{ border: 'none', background: 'none', fontSize: '1.5rem', cursor: 'pointer' }}
-              >
-                &times;
-              </button>
-            </div>
-
-            <div style={{ overflowY: 'auto', flex: 1, border: '1px solid #eee', borderRadius: '8px' }}>
-              {loadingFailures ? (
-                <div style={{ padding: '2rem', textAlign: 'center' }}>Načítám záznamy...</div>
-              ) : selectedRuleFailures.length === 0 ? (
-                <div style={{ padding: '2rem', textAlign: 'center' }}>Žádné záznamy nebyly nalezeny (nebo se vyskytla chyba).</div>
+                    <button
+                      onClick={generateAIRules}
+                      disabled={generatingAI || !hasSystemKey}
+                      style={{
+                        padding: '8px 16px',
+                        background: (generatingAI || !hasSystemKey) ? '#9ca3af' : '#8b5cf6',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: (generatingAI || !hasSystemKey) ? 'not-allowed' : 'pointer'
+                      }}
+                    >
+                      {generatingAI ? 'Generuji...' : '✨ Vygenerovat'}
+                    </button>
+                  </div>
+                </>
               ) : (
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
-                  <thead style={{ position: 'sticky', top: 0, background: '#f8fafc' }}>
-                    <tr>
-                      <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Řádek</th>
-                      <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Hodnota</th>
-                      {selectedRuleFailures[0].val_0 !== undefined && (
-                        <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Detaily</th>
-                      )}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {selectedRuleFailures.map((f, idx) => (
-                      <tr key={idx} style={{ background: idx % 2 === 0 ? '#fff' : '#f9fafb' }}>
-                        <td style={{ padding: '8px', borderBottom: '1px solid #edf2f7', color: '#64748b' }}>#{f.rowIndex + 1}</td>
-                        <td style={{ padding: '8px', borderBottom: '1px solid #edf2f7', fontWeight: 600 }}>{f.value || f.primary_val}</td>
-                        {f.val_0 !== undefined && (
-                          <td style={{ padding: '8px', borderBottom: '1px solid #edf2f7', fontSize: '0.8rem' }}>
-                            {Object.entries(f)
-                              .filter(([key]) => key.startsWith('val_'))
-                              .map(([key, val]) => `${key}: ${val}`).join(' | ')
-                            }
-                          </td>
-                        )}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                <div style={{ textAlign: 'center' }}>
+                  <p style={{ marginBottom: '20px', fontSize: '1.1rem', color: aiResult.startsWith('✅') ? 'green' : 'red' }}>
+                    {aiResult}
+                  </p>
+                  <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
+                    <button
+                      onClick={() => { setShowAIModal(false); setAiResult(''); }}
+                      style={{ padding: '8px 16px', background: '#f3f4f6', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+                    >
+                      Zavřít
+                    </button>
+                    {aiResult.startsWith('❌') && (
+                      <button
+                        onClick={() => setAiResult('')}
+                        style={{ padding: '8px 16px', background: '#3b82f6', color: 'white', border: 'none', borderRadius: '6px', cursor: 'pointer' }}
+                      >
+                        Zkusit znovu
+                      </button>
+                    )}
+                  </div>
+                </div>
               )}
             </div>
+          </div>
+        )
+      }
 
-            <div style={{ marginTop: '1rem', color: '#64748b', fontSize: '0.8rem' }}>
-              Zobrazeno prvních {selectedRuleFailures.length} záznamů.
+      {/* Rule Failure Modal */}
+      {
+        showRuleFailureModal && (
+          <div className="modal-overlay" style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center',
+            alignItems: 'center', zIndex: 1100
+          }}>
+            <div style={{
+              background: 'white', padding: '24px', borderRadius: '12px',
+              width: '800px', maxWidth: '95%', maxHeight: '80vh', display: 'flex', flexDirection: 'column',
+              boxShadow: '0 4px 20px rgba(0,0,0,0.2)'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem' }}>
+                <h3 style={{ margin: 0 }}>🔍 Detailní výpis chyb: {activeRuleTitle}</h3>
+                <button
+                  onClick={() => setShowRuleFailureModal(false)}
+                  style={{ border: 'none', background: 'none', fontSize: '1.5rem', cursor: 'pointer' }}
+                >
+                  &times;
+                </button>
+              </div>
+
+              <div style={{ overflowY: 'auto', flex: 1, border: '1px solid #eee', borderRadius: '8px' }}>
+                {loadingFailures ? (
+                  <div style={{ padding: '2rem', textAlign: 'center' }}>Načítám záznamy...</div>
+                ) : selectedRuleFailures.length === 0 ? (
+                  <div style={{ padding: '2rem', textAlign: 'center' }}>Žádné záznamy nebyly nalezeny (nebo se vyskytla chyba).</div>
+                ) : (
+                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+                    <thead style={{ position: 'sticky', top: 0, background: '#f8fafc' }}>
+                      <tr>
+                        <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Řádek</th>
+                        <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Hodnota</th>
+                        {selectedRuleFailures[0].val_0 !== undefined && (
+                          <th style={{ padding: '8px', textAlign: 'left', borderBottom: '2px solid #e2e8f0' }}>Detaily</th>
+                        )}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedRuleFailures.map((f, idx) => (
+                        <tr key={idx} style={{ background: idx % 2 === 0 ? '#fff' : '#f9fafb' }}>
+                          <td style={{ padding: '8px', borderBottom: '1px solid #edf2f7', color: '#64748b' }}>#{f.rowIndex + 1}</td>
+                          <td style={{ padding: '8px', borderBottom: '1px solid #edf2f7', fontWeight: 600 }}>{f.value || f.primary_val}</td>
+                          {f.val_0 !== undefined && (
+                            <td style={{ padding: '8px', borderBottom: '1px solid #edf2f7', fontSize: '0.8rem' }}>
+                              {Object.entries(f)
+                                .filter(([key]) => key.startsWith('val_'))
+                                .map(([key, val]) => `${key}: ${val}`).join(' | ')
+                              }
+                            </td>
+                          )}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+
+              <div style={{ marginTop: '1rem', color: '#64748b', fontSize: '0.8rem' }}>
+                Zobrazeno prvních {selectedRuleFailures.length} záznamů.
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )
+      }
       {/* Visual Mapper Modal */}
-      {showVisualMapper && selectedProject && (
-        <VisualMapperModal
-          projectId={selectedProject.id}
-          tables={tables}
-          onClose={() => setShowVisualMapper(false)}
-          onSave={() => loadTables(selectedProject.id)}
-        />
-      )}
-    </div>
+      {
+        showVisualMapper && selectedProject && (
+          <VisualMapperModal
+            projectId={selectedProject.id}
+            tables={tables}
+            onClose={() => setShowVisualMapper(false)}
+            onSave={() => loadTables(selectedProject.id)}
+          />
+        )
+      }
+    </div >
   )
 }
 
