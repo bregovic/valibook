@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import './App.css';
+import VisualMapperModal from './VisualMapperModal';
 
 const API_URL = import.meta.env.DEV ? 'http://localhost:3001/api' : '/api';
 
@@ -131,6 +132,7 @@ function App() {
 
   // System Config
   const [showSettingsModal, setShowSettingsModal] = useState(false);
+  const [showVisualMapper, setShowVisualMapper] = useState(false);
   const [hasSystemKey, setHasSystemKey] = useState(false);
   const [newSystemKey, setNewSystemKey] = useState('');
 
@@ -448,7 +450,8 @@ function App() {
     }
   };
 
-  // Detect links automatically
+  /* REMOVED detectLinks (Replaced by VisualMapper) */
+  /*
   const detectLinks = async (mode: 'KEYS' | 'VALUES') => {
     if (!selectedProject) return;
 
@@ -484,6 +487,7 @@ function App() {
       setDetecting(false);
     }
   };
+  */
 
   // Helpers for selection
   const getSuggestionKey = (s: LinkSuggestion) => `${s.sourceColumnId}-${s.targetColumnId}`;
@@ -821,20 +825,24 @@ function App() {
                   {tables.length > 0 && (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
                       <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+
                         <button
                           className="detect-btn"
-                          style={{ background: '#f59e0b', borderColor: '#d97706' }}
-                          onClick={() => detectLinks('KEYS')}
-                          disabled={detecting}
+                          style={{
+                            background: '#3b82f6',
+                            color: 'white',
+                            border: 'none',
+                            padding: '8px 16px',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            fontWeight: 500,
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '6px'
+                          }}
+                          onClick={() => setShowVisualMapper(true)}
                         >
-                          {detecting ? '🔍 ...' : '🔑 Najít Klíče'}
-                        </button>
-                        <button
-                          className="detect-btn"
-                          onClick={() => detectLinks('VALUES')}
-                          disabled={detecting}
-                        >
-                          {detecting ? '🔍 ...' : '📋 Najít Hodnoty'}
+                          🔗 Kontrolované hodnoty
                         </button>
                         <button
                           className="validate-btn"
@@ -1793,8 +1801,17 @@ function App() {
           </div>
         </div>
       )}
+      {/* Visual Mapper Modal */}
+      {showVisualMapper && selectedProject && (
+        <VisualMapperModal
+          projectId={selectedProject.id}
+          tables={tables}
+          onClose={() => setShowVisualMapper(false)}
+          onSave={() => loadTables(selectedProject.id)}
+        />
+      )}
     </div>
-  );
+  )
 }
 
 export default App;
