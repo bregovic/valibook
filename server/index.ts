@@ -1224,7 +1224,7 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
                         SELECT 1 FROM "column_values" target
                         WHERE target."columnId" = ${fkCol.linkedToColumnId} AND target.value = v.value
                       )
-                    LIMIT 11
+                    LIMIT 1000
                 `;
                 orphans = orphanRes;
 
@@ -1253,7 +1253,7 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
                 });
 
                 orphans = await prisma.$queryRaw<Array<{ value: string }>>`
-                    SELECT v.value 
+                    SELECT DISTINCT v.value 
                     FROM "column_values" v
                     WHERE v."columnId" = ${fkCol.id}
                       AND v.value != ''
@@ -1262,7 +1262,7 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
                         WHERE target."columnId" = ${fkCol.linkedToColumnId}
                           AND target.value = v.value
                       )
-                    LIMIT 11
+                    LIMIT 1000
                 `;
 
                 if (orphans.length > 0) {
@@ -1287,7 +1287,7 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
                     fkColumn: fkCol.columnName,
                     pkTable: fkCol.linkedToColumn!.tableName,
                     pkColumn: fkCol.linkedToColumn!.columnName,
-                    missingValues: orphans.slice(0, 10).map(o => o.value),
+                    missingValues: orphans.slice(0, 1000).map(o => o.value),
                     missingCount: totalOrphans,
                     totalFkValues: checkedCount
                 });
@@ -1419,7 +1419,7 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
                     JOIN "column_values" s_val ON s_val."rowIndex" = s_key0."rowIndex" AND s_val."columnId" = '${valCol.id}'
                     JOIN "column_values" t_val ON t_val."rowIndex" = t_key0."rowIndex" AND t_val."columnId" = '${valCol.linkedToColumnId}'
                     AND s_val.value != t_val.value
-                    LIMIT 11
+                    LIMIT 1000
                 `);
 
                 if (mismatches.length > 0) {
@@ -1512,13 +1512,13 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
                         )
 SELECT
     (SELECT COUNT(*) FROM matched) as match_count,
-    (SELECT STRING_AGG(val, ', ') FROM(SELECT val FROM matched ORDER BY val LIMIT 10) sub) as sample_values
+    (SELECT STRING_AGG(val, ', ') FROM(SELECT val FROM matched ORDER BY val LIMIT 1000) sub) as sample_values
                     `);
 
                     if (intersection.length > 0 && Number(intersection[0].match_count) > 0) {
                         const failedCount = Number(intersection[0].match_count);
                         const sampleValues = intersection[0].sample_values
-                            ? intersection[0].sample_values.split(', ').slice(0, 10)
+                            ? intersection[0].sample_values.split(', ').slice(0, 1000)
                             : [];
 
                         forbiddenErrors.push({
@@ -1570,7 +1570,7 @@ SELECT
                               AND v.value != ''
                               AND EXISTS(SELECT 1 FROM "column_values" rv WHERE rv."columnId" = ${filter.rangeColId} AND rv.value = f.value)
                               AND NOT(v.value ~${rule.value})
-                            LIMIT 10
+                            LIMIT 1000
     `;
 
                         if (failures.length > 0) {
@@ -1591,7 +1591,7 @@ SELECT
                             WHERE "columnId" = ${col.id}
                               AND value != ''
                               AND NOT(value ~${rule.value})
-                            LIMIT 10
+                            LIMIT 1000
     `;
 
                         if (failures.length > 0) {

@@ -1059,12 +1059,14 @@ function App() {
                                 <strong>{err.pkTable}.{err.pkColumn}</strong>
                                 <span className="error-count">{err.missingCount} chybějících (sirotků)</span>
                               </div>
-                              <div className="missing-values">
+                              <div className="missing-values" style={{ maxHeight: '200px', overflowY: 'auto', background: '#fafafa', border: '1px solid #eee', padding: '8px' }}>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                                   <div style={{ flex: 1 }}>
                                     <div style={{ marginBottom: '0.5rem', fontSize: '0.75rem', color: '#94a3b8' }}>Tyto hodnoty neexistují v číselníku {err.pkTable}:</div>
-                                    {err.missingValues.join(', ')}
-                                    {err.missingCount > 10 && ` ... a dalších ${err.missingCount - 10}`}
+                                    <div style={{ wordBreak: 'break-word' }}>
+                                      {err.missingValues.join(', ')}
+                                      {err.missingCount > err.missingValues.length && <div style={{ fontStyle: 'italic', marginTop: '4px', color: '#64748b' }}>... a dalších {err.missingCount - err.missingValues.length} (zobrazeno {err.missingValues.length})</div>}
+                                    </div>
                                   </div>
                                   <button
                                     onClick={() => removeColumnLink(err.fkTable, err.fkColumn)}
@@ -1097,11 +1099,11 @@ function App() {
                               <strong>{err.forbiddenTable}.{err.forbiddenColumn}</strong>
                               <span className="error-count" style={{ background: '#fef3c7', color: '#d97706', borderColor: '#fcd34d' }}>{err.count} zakázaných hodnot</span>
                             </div>
-                            <div className="missing-values">
+                            <div className="missing-values" style={{ maxHeight: '200px', overflowY: 'auto' }}>
                               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                <div style={{ flex: 1 }}>
+                                <div style={{ flex: 1, wordBreak: 'break-word' }}>
                                   Nalezeny hodnoty z blacklistu: {err.foundValues.join(', ')}
-                                  {err.count > 10 && ` ... a dalších ${err.count - 10}`}
+                                  {err.count > err.foundValues.length && <span style={{ color: '#64748b', fontStyle: 'italic' }}> ... a dalších {err.count - err.foundValues.length}</span>}
                                 </div>
                                 <button
                                   onClick={() => deleteForbiddenTable(err.forbiddenTable)}
@@ -1222,7 +1224,7 @@ function App() {
                               <strong>{err.targetTable}.{err.targetColumn}</strong>
                               <span className="error-count" style={{ background: '#fef3c7', color: '#d97706', borderColor: '#fcd34d' }}>{err.count} neshod</span>
                             </div>
-                            <div className="missing-values">
+                            <div className="missing-values" style={{ maxHeight: '300px', overflowY: 'auto' }}>
                               <div style={{ marginBottom: '0.5rem', fontWeight: 600, fontSize: '0.75rem' }}>Spojeno přes klíč: {err.joinKey}</div>
                               <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
                                 {err.mismatches.map((m, j) => (
