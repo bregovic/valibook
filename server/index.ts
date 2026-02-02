@@ -1361,8 +1361,13 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
                     sourceColumn: primaryKeyLink.columnName,
                     targetTable: targetCol.tableName,
                     targetColumn: targetCol.columnName,
-                    failureCount: 1,
-                    samples: ['CRITICAL: Cílový klíč obsahuje duplicity. Nelze bezpečně napárovat řádky. Opravte data nebo zvolte unikátní klíč.']
+                    joinKey: primaryKeyLink.columnName,
+                    count: 1,
+                    mismatches: [{
+                        key: 'SYSTEM ERROR',
+                        source: 'Duplicity v klíči',
+                        target: 'Nelze napárovat'
+                    }]
                 });
                 continue; // SKIP the potentially exploding join
             }
