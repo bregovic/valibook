@@ -1433,8 +1433,9 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
                         sourceColumn: valCol.columnName,
                         targetTable: valCol.linkedToColumn!.tableName,
                         targetColumn: valCol.linkedToColumn!.columnName,
-                        failureCount: count,
-                        samples: mismatches.map(m => `Key:${m.key || 'N/A'} | '${m.source}' vs '${m.target}'`)
+                        joinKey: primaryKeyLink.columnName,
+                        count: count,
+                        mismatches: mismatches
                     });
 
                     allChecks.push({
