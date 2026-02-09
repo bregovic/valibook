@@ -144,6 +144,35 @@ function App() {
     } catch (e) { console.error(e); }
   }, []);
 
+  // DB Stats State
+  const [showDbStatsModal, setShowDbStatsModal] = useState(false);
+  const [dbStats, setDbStats] = useState<{ dbSize: string, tableSizes: any[] } | null>(null);
+  const [vacuuming, setVacuuming] = useState(false);
+
+  const fetchDbStats = async () => {
+    try {
+      const res = await fetch(`${API_URL}/admin/db-stats`);
+      const data = await res.json();
+      setDbStats(data);
+    } catch (e) { console.error(e); }
+  };
+
+  const runVacuum = async () => {
+    if (!confirm('Tato operace může trvat několik minut a během ní bude aplikace nedostupná. Opravdu spustit čištění místa (VACUUM FULL)?')) return;
+    setVacuuming(true);
+    try {
+      const res = await fetch(`${API_URL}/admin/db-vacuum`, { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        alert('Čištění dokončeno! Místo bylo uvolněno.');
+        fetchDbStats();
+      } else {
+        alert('Chyba: ' + data.error);
+      }
+    } catch (e) { alert('Chyba spojení.'); }
+    setVacuuming(false);
+  };
+
   useEffect(() => { checkConfig(); }, [checkConfig]);
 
   const saveSettings = async () => {
@@ -715,13 +744,22 @@ function App() {
         <div className="logo-section">
           <img src="/logo.png" alt="Valibook" className="app-logo" />
           <h1>Valibook</h1>
-          <button
-            onClick={() => setShowSettingsModal(true)}
-            style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '1.2rem', padding: '0 8px' }}
-            title="Globální nastavení (API Key)"
-          >
-            ⚙️
-          </button>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              onClick={() => { setShowDbStatsModal(true); fetchDbStats(); }}
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '1.2rem', padding: '0 8px' }}
+              title="Správa databáze (Místo)"
+            >
+              📊
+            </button>
+            <button
+              onClick={() => setShowSettingsModal(true)}
+              style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '1.2rem', padding: '0 8px' }}
+              title="Globální nastavení (API Key)"
+            >
+              ⚙️
+            </button>
+          </div>
         </div>
         <p>Excel Validation Tool</p>
       </header>
@@ -1889,6 +1927,80 @@ function App() {
             onClose={() => setShowVisualMapper(false)}
             onSave={() => loadTables(selectedProject.id)}
           />
+        )
+      }
+      {/* DB Stats Modal */}
+      {
+        showDbStatsModal && (
+          <div style={{
+            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+            background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1200
+          }}>
+            <div style={{
+              background: 'white', padding: '24px', borderRadius: '12px', width: '600px', maxWidth: '95%',
+              boxShadow: '0 4px 20px rgba(0,0,0,0.2)'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <h3 style={{ margin: 0, color: '#1f2937' }}>📊 Stav Databáze</h3>
+                <button onClick={() => setShowDbStatsModal(false)} style={{ border: 'none', background: 'none', fontSize: '1.5rem', cursor: 'pointer' }}>&times;</button>
+              </div>
+
+              {dbStats ? (
+                <div>
+                  <div style={{ background: '#f3f4f6', padding: '16px', borderRadius: '8px', marginBottom: '20px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '0.9rem', color: '#6b7280', marginBottom: '4px' }}>Celková velikost DB</div>
+                    <div style={{ fontSize: '2rem', fontWeight: 700, color: '#111827' }}>{dbStats.dbSize}</div>
+                  </div>
+
+                  <h4 style={{ margin: '0 0 10px' }}>Top Tabulky</h4>
+                  <div style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid #e5e7eb', borderRadius: '8px' }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.9rem' }}>
+                      <thead style={{ background: '#f9fafb', position: 'sticky', top: 0 }}>
+                        <tr>
+                          <th style={{ textAlign: 'left', padding: '10px', borderBottom: '1px solid #e5e7eb' }}>Tabulka</th>
+                          <th style={{ textAlign: 'right', padding: '10px', borderBottom: '1px solid #e5e7eb' }}>Velikost</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {dbStats.tableSizes.map((t, idx) => (
+                          <tr key={idx} style={{ borderBottom: '1px solid #f3f4f6' }}>
+                            <td style={{ padding: '8px 10px' }}>{t.table}</td>
+                            <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace' }}>{t.size}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div style={{ marginTop: '20px', padding: '16px', background: '#fffbeb', borderRadius: '8px', border: '1px solid #fcd34d' }}>
+                    <h4 style={{ margin: '0 0 8px', color: '#92400e', fontSize: '0.95rem' }}>🧹 Údržba</h4>
+                    <p style={{ margin: '0 0 12px', fontSize: '0.85rem', color: '#b45309' }}>
+                      Pokud jste smazali projekty, ale velikost DB neklesla, spusťte čištění. Operace může chvíli trvat a dočasně zablokovat aplikaci.
+                    </p>
+                    <button
+                      onClick={runVacuum}
+                      disabled={vacuuming}
+                      style={{
+                        width: '100%',
+                        padding: '10px',
+                        background: vacuuming ? '#9ca3af' : '#d97706',
+                        color: 'white',
+                        border: 'none',
+                        borderRadius: '6px',
+                        cursor: vacuuming ? 'wait' : 'pointer',
+                        fontWeight: 600
+                      }}
+                    >
+                      {vacuuming ? '⏳ Čištění probíhá...' : 'Spustit čištění (VACUUM FULL)'}
+                    </button>
+                  </div>
+
+                </div>
+              ) : (
+                <div style={{ padding: '40px', textAlign: 'center', color: '#6b7280' }}>Načítám statistiky...</div>
+              )}
+            </div>
+          </div>
         )
       }
     </div >
