@@ -799,7 +799,7 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                     ORDER BY random() LIMIT 10
                 `;
                 // Ensure values are strings to prevent [object Object] mapping errors
-                targetSamplesMap.set(tCol.id, samples.map(s => String(s.value || '')));
+                targetSamplesMap.set(tCol.id, samples.map(s => String(s?.value || '')));
             }
 
             // 3. Scan SOURCE columns against TARGET samples
