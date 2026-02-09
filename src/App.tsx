@@ -1962,12 +1962,14 @@ function App() {
                         </tr>
                       </thead>
                       <tbody>
-                        {dbStats.tableSizes.map((t, idx) => (
+                        {dbStats.tableSizes && Array.isArray(dbStats.tableSizes) ? dbStats.tableSizes.map((t, idx) => (
                           <tr key={idx} style={{ borderBottom: '1px solid #f3f4f6' }}>
                             <td style={{ padding: '8px 10px' }}>{t.table}</td>
                             <td style={{ padding: '8px 10px', textAlign: 'right', fontFamily: 'monospace' }}>{t.size}</td>
                           </tr>
-                        ))}
+                        )) : (
+                          <tr><td colSpan={2} style={{ padding: '10px', textAlign: 'center' }}>Žádná data</td></tr>
+                        )}
                       </tbody>
                     </table>
                   </div>
