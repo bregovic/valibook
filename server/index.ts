@@ -1489,7 +1489,7 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
             });
 
             // Filters logic
-            // Filters logic (WHERE clause)
+            // Filters logic (WHERE clause) - defined safely
             const whereSQL = `
                 WHERE s_key0."columnId" = '${primaryKeyLink.id}'
                   AND s_key0.value != ''
