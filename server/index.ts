@@ -761,9 +761,105 @@ app.post('/api/projects/:projectId/ai-suggest-rules', async (req, res) => {
 // ============================================
 app.post('/api/projects/:projectId/detect-links', async (req, res) => {
     const { projectId } = req.params;
-    const mode = req.query.mode as string | undefined; // 'KEYS' | 'VALUES'
+    const mode = req.query.mode as string | undefined; // 'KEYS' | 'VALUES' | 'FAST_KEYS'
 
     try {
+        // FAST_KEYS Mode: Optimized for speed
+        if (mode === 'FAST_KEYS') {
+            console.log('Running FAST_KEYS detection...');
+            const columns = await prisma.column.findMany({
+                where: { projectId },
+                select: { id: true, tableName: true, columnName: true, tableType: true, isPrimaryKey: true, uniqueCount: true, rowCount: true }
+            });
+
+            // 1. Identify Candidates
+            // TARGET tables are potential Reference Tables (PKs)
+            // SOURCE tables are potential Fact Tables (FKs)
+            // We also check TARGET vs TARGET (hierarchies)
+            const targetCols = columns.filter(c => c.tableType === 'TARGET');
+            const sourceCols = columns.filter(c => c.tableType === 'SOURCE' || c.tableType === 'TARGET');
+
+            const suggestions: any[] = [];
+            const seenPairs = new Set<string>();
+
+            // 2. Pre-fetch samples for TARGET columns (Potential PKs)
+            // Only 10 samples as requested
+            const targetSamplesMap = new Map<string, string[]>();
+
+            for (const tCol of targetCols) {
+                // Must be reasonably unique to be a key candidate (>80%)
+                const uniqueness = (tCol.uniqueCount ?? 0) / Math.max(tCol.rowCount ?? 1, 1);
+                if (uniqueness < 0.8) continue;
+
+                const samples = await prisma.$queryRaw<Array<{ value: string }>>`
+                    SELECT DISTINCT value FROM "column_values" 
+                    WHERE "columnId" = ${tCol.id} AND value != '' 
+                    ORDER BY random() LIMIT 10
+                `;
+                targetSamplesMap.set(tCol.id, samples.map(s => s.value));
+            }
+
+            // 3. Scan SOURCE columns against TARGET samples
+            // For each Target Column (PK Candidate)
+            for (const pkCol of targetCols) {
+                const samples = targetSamplesMap.get(pkCol.id);
+                if (!samples || samples.length === 0) continue;
+
+                const stringSamples = samples.map(s => String(s));
+                const paramOffset = 2 + stringSamples.length;
+                const normalizedSamples = samples.map(s => String(s).replace(/\s/g, '').replace(',', '.'));
+
+                // Find which SOURCE columns contain these values
+                // We search in ALL potential source columns
+                const matchRes = await prisma.$queryRawUnsafe<Array<{ columnId: string, match_count: bigint }>>(`
+                    SELECT "columnId", COUNT(DISTINCT value) as match_count
+                    FROM "column_values"
+                    WHERE "columnId" != $1 
+                      AND (
+                        value::text IN (${stringSamples.map((_, i) => `$${i + 2}`).join(',')})
+                        OR 
+                        REPLACE(REPLACE(REPLACE(value::text, ' ', ''), chr(160), ''), ',', '.') IN (${normalizedSamples.map((_, i) => `$${i + paramOffset}`).join(',')})
+                      )
+                    GROUP BY "columnId"
+                `, pkCol.id, ...stringSamples, ...normalizedSamples);
+
+                const matchMap = new Map<string, number>();
+                matchRes.forEach(r => matchMap.set(r.columnId, Number(r.match_count)));
+
+                for (const fkCol of sourceCols) {
+                    if (pkCol.id === fkCol.id) continue;
+                    if (pkCol.tableName === fkCol.tableName) continue;
+
+                    // Check match
+                    const matchCount = matchMap.get(fkCol.id) || 0;
+                    const matchPct = (matchCount / samples.length) * 100;
+
+                    // Req: 90% Match
+                    if (matchPct >= 90) {
+                        const pairKey = [pkCol.id, fkCol.id].sort().join('|');
+                        if (seenPairs.has(pairKey)) continue;
+                        seenPairs.add(pairKey);
+
+                        suggestions.push({
+                            sourceColumnId: fkCol.id, // FK
+                            sourceColumn: fkCol.columnName,
+                            sourceTable: fkCol.tableName,
+                            targetColumnId: pkCol.id, // PK
+                            targetColumn: pkCol.columnName,
+                            targetTable: pkCol.tableName,
+                            matchPercentage: matchPct,
+                            commonValues: matchCount, // Just sample count
+                            sampleSize: samples.length
+                        });
+                    }
+                }
+            }
+
+            // Return immediately without full overlap check
+            return res.json({ success: true, suggestions });
+        }
+
+        // STANDARD LOGIC ('KEYS' | 'VALUES' original modes)
         // Get all columns
         const columns = await prisma.column.findMany({
             where: { projectId },
@@ -778,11 +874,11 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
             }
         });
 
-        // For each column, get 10 random non-empty sample values
+        // For each column, get 50 random non-empty sample values (Original Logic)
         const columnSamplesMap = new Map<string, string[]>();
 
         for (const col of columns) {
-            // Get 30 random unique samples to be extra sure
+            // Get 50 random unique samples to be extra sure
             const samples = await prisma.$queryRaw<Array<{ value: string }>>`
                 SELECT value FROM (
                     SELECT DISTINCT value 
@@ -865,32 +961,8 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                 if (!matchMap.has(colB.id)) continue;
 
                 const sampleMatchCount = matchMap.get(colB.id)!;
-                /* OLD LOGIC REMOVED
-
-                // 2. Normalize DB VALUES (Source) in SQL and compare against normalized samples
-                const paramOffset = 2 + samplesA.length;
-                // Ensure all parameters are strings to avoid type mismatch errors
-                const stringSamples = samplesA.map(s => String(s));
-
-                const matchRes = await prisma.$queryRawUnsafe<Array<{ match_count: bigint }>>(`
-                    SELECT COUNT(DISTINCT value) as match_count
-                    FROM "column_values"
-                    WHERE "columnId" = $1 
-                      AND (
-                        value::text IN (${stringSamples.map((_, i) => `$${i + 2}`).join(',')})
-                        OR 
-                        REPLACE(REPLACE(REPLACE(value::text, ' ', ''), chr(160), ''), ',', '.') IN (${normalizedSamples.map((_, i) => `$${i + paramOffset}`).join(',')})
-                      )
-                `, colB.id, ...stringSamples, ...normalizedSamples);
-
-                */
                 const sampleMatchPct = Math.round((sampleMatchCount / samplesA.length) * 100);
                 const namesSimilar = colA.columnName.trim().toLowerCase() === colB.columnName.trim().toLowerCase();
-
-                // LOGIC SPLIT: KEY CANDIDATE vs VALUE CANDIDATE
-                // User Request: "Find Reference Keys" strictly for unique non-duplicate values.
-
-
 
                 // FILTER BY MODE: 
                 // KEYS mode: Only show high-uniqueness candidates
@@ -900,17 +972,14 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                 let isMatch = false;
 
                 if (isKeyCandidate) {
-                    // KEY STRATEGY: 90% match required (was 97%)
+                    // KEY STRATEGY: 90% match required
                     if (sampleMatchPct >= 90) {
                         isMatch = true;
                     }
-                    // Fallback: If in KEYS mode, and match is very high (98%), accept even if uniqueness is lower (handled by isKeyCandidate check above)
                 }
 
                 if (!isKeyCandidate || mode === 'VALUES') {
                     // VALUE STRATEGY: Relaxed thresholds
-                    // 50% threshold for general matches (was 60%) to catch dirtier data
-                    // 40% threshold if names match
                     if (sampleMatchPct >= 50 || (namesSimilar && sampleMatchPct >= 40)) {
                         isMatch = true;
                     }
@@ -950,7 +1019,7 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                                 sourceColumnId: colB.id,
                                 sourceColumn: colB.columnName,
                                 sourceTable: colB.tableName,
-                                targetColumnId: colA.id,
+                                targetColumnId: colA.id, // PK
                                 targetColumn: colA.columnName,
                                 targetTable: colA.tableName,
                                 matchPercentage: bestMatchPct,
@@ -962,7 +1031,7 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                                 sourceColumnId: colA.id,
                                 sourceColumn: colA.columnName,
                                 sourceTable: colA.tableName,
-                                targetColumnId: colB.id,
+                                targetColumnId: colB.id, // PK
                                 targetColumn: colB.columnName,
                                 targetTable: colB.tableName,
                                 matchPercentage: bestMatchPct,
@@ -974,14 +1043,6 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                 }
             }
         }
-
-
-
-
-
-
-
-
 
         // Sort by match count (highest first)
         suggestions.sort((a, b) => b.commonValues - a.commonValues || b.matchPercentage - a.matchPercentage);

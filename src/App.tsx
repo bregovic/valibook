@@ -451,7 +451,7 @@ function App() {
   };
 
   // Detect links automatically
-  const detectLinks = async (mode: 'KEYS' | 'VALUES') => {
+  const detectLinks = async (mode: 'KEYS' | 'VALUES' | 'FAST_KEYS') => {
     if (!selectedProject) return;
 
     setDetecting(true);
@@ -849,6 +849,15 @@ function App() {
                           disabled={detecting}
                         >
                           {detecting ? '🔍 ...' : '🔑 Najít Klíče'}
+                        </button>
+                        <button
+                          className="detect-btn"
+                          style={{ background: '#d946ef', borderColor: '#c026d3' }}
+                          onClick={() => detectLinks('FAST_KEYS')}
+                          disabled={detecting}
+                          title="Rychlá detekce primárních klíčů (menší vzorek)"
+                        >
+                          {detecting ? '🔍 ...' : '⚡ Rychlé klíče'}
                         </button>
                         <button
                           className="detect-btn"
