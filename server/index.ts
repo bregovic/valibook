@@ -792,11 +792,15 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                 if (uniqueness < 0.8) continue;
 
                 const samples = await prisma.$queryRaw<Array<{ value: string }>>`
-                    SELECT DISTINCT value FROM "column_values" 
-                    WHERE "columnId" = ${tCol.id} 
-                      AND value != '' 
-                      AND value IS NOT NULL
-                    ORDER BY random() LIMIT 10
+                    SELECT value FROM (
+                        SELECT DISTINCT value 
+                        FROM "column_values" 
+                        WHERE "columnId" = ${tCol.id} 
+                          AND value != '' 
+                          AND value IS NOT NULL
+                    ) AS distinct_vals
+                    ORDER BY random() 
+                    LIMIT 10
                 `;
                 // Ensure values are strings to prevent [object Object] mapping errors
                 targetSamplesMap.set(tCol.id, samples.map(s => String(s?.value || '')));
