@@ -15,6 +15,17 @@ const PORT = process.env.PORT || 3001;
 
 console.log('Starting Valibook Server...'); // Startup check
 
+process.on('uncaughtException', (err) => {
+    console.error('UNCAUGHT EXCEPTION:', err);
+    // Keep running if possible, or exit cleanly? 
+    // Usually better to let it crash and restart, but log it first.
+    process.exit(1);
+});
+
+process.on('unhandledRejection', (reason) => {
+    console.error('UNHANDLED REJECTION:', reason);
+});
+
 
 app.use(cors());
 app.use(express.json({ limit: '50mb' }));
