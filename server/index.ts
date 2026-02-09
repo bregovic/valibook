@@ -36,7 +36,10 @@ async function logDbStats() {
     }
 }
 
-logDbStats();
+// Delay initial stats check to let server start first
+setTimeout(() => {
+    logDbStats().catch(err => console.error('Delayed DB Stats failed:', err));
+}, 5000);
 
 // Global Error Handlers
 
