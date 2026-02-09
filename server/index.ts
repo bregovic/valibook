@@ -15,6 +15,31 @@ const PORT = process.env.PORT || 3001;
 
 console.log('Starting Valibook Server...'); // Startup check
 
+async function logDbStats() {
+    try {
+        const dbSize = await prisma.$queryRaw<any[]>`SELECT pg_size_pretty(pg_database_size(current_database())) as size`;
+        const tableSizes = await prisma.$queryRaw<any[]>`
+            SELECT
+              relname as "table",
+              pg_size_pretty(pg_total_relation_size(relid)) as size,
+              pg_total_relation_size(relid) as raw_size
+            FROM pg_catalog.pg_statio_user_tables
+            ORDER BY pg_total_relation_size(relid) DESC
+            LIMIT 5;
+        `;
+        console.log('=== DB STATISTICS ===');
+        console.log('Total DB Size:', dbSize[0]?.size);
+        console.log('Top Tables:', JSON.stringify(tableSizes, null, 2));
+        console.log('=====================');
+    } catch (e) {
+        console.error('Failed to log DB stats:', e);
+    }
+}
+
+logDbStats();
+
+// Global Error Handlers
+
 process.on('uncaughtException', (err) => {
     console.error('UNCAUGHT EXCEPTION:', err);
     // Keep running if possible, or exit cleanly? 
@@ -375,6 +400,36 @@ app.delete('/api/columns/:id', async (req, res) => {
 });
 
 // Get all unique tables in a project (grouped)
+app.get('/api/admin/db-stats', async (req, res) => {
+    try {
+        const dbSize = await prisma.$queryRaw<any[]>`SELECT pg_size_pretty(pg_database_size(current_database())) as size`;
+        const tableSizes = await prisma.$queryRaw<any[]>`
+            SELECT
+              relname as "table",
+              pg_size_pretty(pg_total_relation_size(relid)) as size,
+              pg_total_relation_size(relid) as raw_size
+            FROM pg_catalog.pg_statio_user_tables
+            ORDER BY pg_total_relation_size(relid) DESC
+            LIMIT 20;
+        `;
+        res.json({ dbSize: dbSize[0]?.size, tableSizes });
+    } catch (error) {
+        res.status(500).json({ error: (error as Error).message });
+    }
+});
+
+app.post('/api/admin/db-vacuum', async (req, res) => {
+    try {
+        console.log('Starting VACUUM FULL...');
+        // VACUUM FULL reclaims disk space but locks the database efficiently
+        await prisma.$executeRawUnsafe(`VACUUM FULL`);
+        console.log('VACUUM FULL completed.');
+        res.json({ success: true, message: 'Vacuum complete' });
+    } catch (error) {
+        console.error('Vacuum failed:', error);
+        res.status(500).json({ error: (error as Error).message });
+    }
+});
 app.get('/api/projects/:projectId/tables', async (req, res) => {
     const { projectId } = req.params;
 
