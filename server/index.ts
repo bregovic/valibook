@@ -1072,7 +1072,28 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
     }
 });
 
-// Function to get the row index with the most non-empty values
+
+
+
+// Reset all links for a project
+app.post('/api/projects/:projectId/reset-links', async (req, res) => {
+    const { projectId } = req.params;
+    const { resetPrimaryKeys } = req.body; // Optional: also reset PKs
+
+    try {
+        await prisma.column.updateMany({
+            where: { projectId },
+            data: {
+                linkedToColumnId: null,
+                ...(resetPrimaryKeys ? { isPrimaryKey: false } : {})
+            }
+        });
+        res.json({ success: true });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ error: (error as Error).message });
+    }
+});
 // Function to get the row index with optionally filtering or random selection
 async function getMostPopulatedRowIndex(columnIds: string[], lookupColId?: string, lookupValue?: string, random: boolean = false): Promise<number | null> {
     if (columnIds.length === 0) return null;

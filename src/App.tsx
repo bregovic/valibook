@@ -493,6 +493,31 @@ function App() {
     }
   };
 
+  // Reset all links
+  const resetLinks = async () => {
+    if (!selectedProject) return;
+    if (!confirm('Opravdu chcete SMAZAT všechny existující vazby mezi tabulkami? \n(Primární klíče zůstanou zachovány)')) return;
+
+    // Optional 2nd confirmation for PKs?
+    // let resetPKs = confirm('Chcete zrušit i označení Primárních klíčů?');
+    const resetPKs = false; // By default just links as requested
+
+    setDetecting(true);
+    try {
+      await fetch(`${API_URL}/projects/${selectedProject.id}/reset-links`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resetPrimaryKeys: resetPKs })
+      });
+      await loadTables(selectedProject.id);
+      alert('Vazby byly smazány.');
+    } catch (err) {
+      alert('Reset failed: ' + (err as Error).message);
+    } finally {
+      setDetecting(false);
+    }
+  };
+
   // Helpers for selection
   const getSuggestionKey = (s: LinkSuggestion) => `${s.sourceColumnId}-${s.targetColumnId}`;
 
@@ -906,6 +931,22 @@ function App() {
                           onClick={() => setShowAIModal(true)}
                         >
                           ✨ AI Pravidla
+                        </button>
+                        <button
+                          style={{
+                            background: '#ef4444', // Red
+                            color: 'white',
+                            border: 'none',
+                            padding: '8px 16px',
+                            borderRadius: '6px',
+                            cursor: 'pointer',
+                            fontWeight: 500,
+                            marginLeft: '10px'
+                          }}
+                          onClick={resetLinks}
+                          title="Smazat všechny vazby mezi tabulkami"
+                        >
+                          ❌ Reset
                         </button>
                       </div>
                       {(validating || detecting) && (
