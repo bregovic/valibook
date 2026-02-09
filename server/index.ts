@@ -787,9 +787,11 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
             const targetSamplesMap = new Map<string, string[]>();
 
             for (const tCol of targetCols) {
-                // Must be reasonably unique to be a key candidate (>80%)
+                // Must be reasonably unique to be a key candidate (>90%)
+                // And must have enough entropy (at least 10 unique values) to - exclude booleans/enums
                 const uniqueness = (tCol.uniqueCount ?? 0) / Math.max(tCol.rowCount ?? 1, 1);
-                if (uniqueness < 0.8) continue;
+                if (uniqueness < 0.9) continue;
+                if ((tCol.uniqueCount ?? 0) < 10) continue;
 
                 const samples = await prisma.$queryRaw<Array<{ value: string }>>`
                     SELECT value FROM (
@@ -803,7 +805,12 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
                     LIMIT 10
                 `;
                 // Ensure values are strings to prevent [object Object] mapping errors
-                targetSamplesMap.set(tCol.id, samples.map(s => String(s?.value || '')));
+                const validSamples = samples.map(s => String(s?.value || '')).filter(s => s.length > 0);
+
+                // If we retrieved fewer than 5 distinct samples, it's likely a small enum or boolean -> Skip
+                if (validSamples.length < 5) continue;
+
+                targetSamplesMap.set(tCol.id, validSamples);
             }
 
             // 3. Scan SOURCE columns against TARGET samples
