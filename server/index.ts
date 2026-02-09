@@ -1489,19 +1489,25 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
             });
 
             // Filters logic
-            joinSQL += `
-                ${filterS ? `JOIN "column_values" fs ON fs."rowIndex" = s_key0."rowIndex" AND fs."columnId" = '${filterS.colId}'` : ''}
-                ${filterT ? `JOIN "column_values" ft ON ft."rowIndex" = t_key0."rowIndex" AND ft."columnId" = '${filterT.colId}'` : ''}
+            // Filters logic (WHERE clause)
+            const whereSQL = `
                 WHERE s_key0."columnId" = '${primaryKeyLink.id}'
                   AND s_key0.value != ''
                   ${filterS ? `AND EXISTS (SELECT 1 FROM "column_values" rv WHERE rv."columnId" = '${filterS.rangeColId}' AND rv.value = fs.value)` : ''}
                   ${filterT ? `AND EXISTS (SELECT 1 FROM "column_values" rv WHERE rv."columnId" = '${filterT.rangeColId}' AND rv.value = ft.value)` : ''}
             `;
 
+            // Extra Joins for filters
+            joinSQL += `
+                ${filterS ? `JOIN "column_values" fs ON fs."rowIndex" = s_key0."rowIndex" AND fs."columnId" = '${filterS.colId}'` : ''}
+                ${filterT ? `JOIN "column_values" ft ON ft."rowIndex" = t_key0."rowIndex" AND ft."columnId" = '${filterT.colId}'` : ''}
+            `;
+
             // Get Checked Count (Joined rows)
             const joinedCountRes = await prisma.$queryRawUnsafe<Array<{ count: bigint }>>(`
                 SELECT COUNT(*) as count
                 ${joinSQL}
+                ${whereSQL}
             `);
             const checkedCount = Number(joinedCountRes[0].count);
 
@@ -1514,6 +1520,7 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
                     ${joinSQL}
                     JOIN "column_values" s_val ON s_val."rowIndex" = s_key0."rowIndex" AND s_val."columnId" = '${valCol.id}'
                     JOIN "column_values" t_val ON t_val."rowIndex" = t_key0."rowIndex" AND t_val."columnId" = '${valCol.linkedToColumnId}'
+                    ${whereSQL}
                     AND s_val.value != t_val.value
                     LIMIT 1000
                 `);
@@ -1524,6 +1531,7 @@ app.post('/api/projects/:projectId/validate', async (req, res) => {
                         ${joinSQL}
                         JOIN "column_values" s_val ON s_val."rowIndex" = s_key0."rowIndex" AND s_val."columnId" = '${valCol.id}'
                         JOIN "column_values" t_val ON t_val."rowIndex" = t_key0."rowIndex" AND t_val."columnId" = '${valCol.linkedToColumnId}'
+                        ${whereSQL}
                         AND s_val.value != t_val.value
                     `);
                     const count = Number(mismatchCountRes[0].count);
