@@ -793,10 +793,13 @@ app.post('/api/projects/:projectId/detect-links', async (req, res) => {
 
                 const samples = await prisma.$queryRaw<Array<{ value: string }>>`
                     SELECT DISTINCT value FROM "column_values" 
-                    WHERE "columnId" = ${tCol.id} AND value != '' 
+                    WHERE "columnId" = ${tCol.id} 
+                      AND value != '' 
+                      AND value IS NOT NULL
                     ORDER BY random() LIMIT 10
                 `;
-                targetSamplesMap.set(tCol.id, samples.map(s => s.value));
+                // Ensure values are strings to prevent [object Object] mapping errors
+                targetSamplesMap.set(tCol.id, samples.map(s => String(s.value || '')));
             }
 
             // 3. Scan SOURCE columns against TARGET samples
@@ -1894,7 +1897,7 @@ SELECT * FROM rows
             if (reconciliationErrors.length > 0) {
                 protocol += `-- - REKONSILIACE(NESHODY)-- -\n`;
                 reconciliationErrors.forEach(e => {
-                    protocol += `- ${e.sourceTable}.${e.sourceColumn} vs ${e.targetTable}.${e.targetColumn}: ${e.failureCount} neshod\n`;
+                    protocol += `- ${e.sourceTable}.${e.sourceColumn} vs ${e.targetTable}.${e.targetColumn}: ${e.count} neshod\n`;
                 });
             }
             if (ruleErrors.length > 0) {

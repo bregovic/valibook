@@ -459,6 +459,12 @@ function App() {
       const res = await fetch(`${API_URL}/projects/${selectedProject.id}/detect-links?mode=${mode}`, {
         method: 'POST'
       });
+
+      if (!res.ok) {
+        const errText = await res.text();
+        throw new Error(`Server Error (${res.status}): ${errText}`);
+      }
+
       const data = await res.json();
 
       if (data.success) {
@@ -1632,6 +1638,7 @@ function App() {
               </div>
               <div style={{ marginBottom: '20px' }}>
                 <label style={{ display: 'block', marginBottom: '4px', fontWeight: 500 }}>Potvrzení heslem</label>
+
                 <input
                   type="password"
                   placeholder="Heslo"
